@@ -16,6 +16,7 @@
 pub mod bidi;
 mod complex;
 mod mtext;
+pub mod shx;
 mod stroke;
 pub mod subset;
 pub mod ttf;
@@ -263,6 +264,9 @@ pub fn line_width(s: &str, height: f64, width_factor: f64) -> f64 {
 /// Width of the gap MTEXT leaves between two words. Words are measured without their trailing
 /// letter gap, so the stroke font's gap is added on both sides of the space, as TEXT lays it out.
 pub fn space_width(font: &TextFont, height: f64, width_factor: f64) -> f64 {
+    if let TextFont::Shx(f) = font {
+        return f.width(" ", height, width_factor);
+    }
     if let TextFont::Outline(face) = font
         && let Some(w) = ttf::width(face, " ", height, width_factor)
     {
@@ -271,20 +275,28 @@ pub fn space_width(font: &TextFont, height: f64, width_factor: f64) -> f64 {
     stroke_advance(' ', height, width_factor) + stroke::GAP / stroke::CAP * height * width_factor
 }
 
-/// The font a piece of text is set in: the built-in stroke font or an installed TrueType /
-/// OpenType face (outlines). Either way, characters the font lacks come from a fallback font.
+/// The font a piece of text is set in: built-in strokes, runtime SHX, or installed outline
+/// fonts. Characters the chosen font lacks come from a fallback font.
 #[derive(Clone, Debug, Default)]
 pub enum TextFont {
     #[default]
     Stroke,
     Outline(ttf::Face),
+    Shx(shx::Font),
 }
 
 impl TextFont {
-    /// Resolve a text style font name: an installed TTF/OTF/TTC when found; else, for a font we
-    /// can't find (an SHX file, a missing TTF), the FONTALT font ([`ttf::font_alt`]) when set;
+    /// Resolve a text style font name: a user-supplied SHX or installed TTF/OTF/TTC when found;
+    /// else, for a missing or unsupported font, FONTALT ([`ttf::font_alt`]) when set;
     /// else the stroke font.
     pub fn resolve(name: &str) -> TextFont {
+        Self::resolve_style(name, "", "")
+    }
+    /// Resolve both font files in a DXF text style, retaining Big Font layout instructions.
+    pub fn resolve_style(name: &str, big_name: &str, code_page: &str) -> TextFont {
+        if let Some(f) = shx::find(name, big_name, code_page) {
+            return TextFont::Shx(f);
+        }
         if let Some(f) = ttf::find(name) {
             return TextFont::Outline(f);
         }
@@ -414,6 +426,9 @@ pub(crate) fn decorations(spans: &[(f64, f64, bool, bool)], h: f64) -> Vec<Vec<V
 /// Shape one line in `font` (baseline at y = 0, x from 0). TrueType fonts that fail to parse
 /// fall back to the stroke font.
 pub fn shape_line(font: &TextFont, s: &str, height: f64, width_factor: f64, oblique: f64) -> Shaped {
+    if let TextFont::Shx(f) = font {
+        return f.shape(s, height, width_factor, oblique);
+    }
     if let TextFont::Outline(face) = font
         && let Some(sh) = ttf::shape(face, s, height, width_factor, oblique)
     {
@@ -424,6 +439,9 @@ pub fn shape_line(font: &TextFont, s: &str, height: f64, width_factor: f64, obli
 
 /// Width of one line in `font`.
 pub fn text_width(font: &TextFont, s: &str, height: f64, width_factor: f64) -> f64 {
+    if let TextFont::Shx(f) = font {
+        return f.width(s, height, width_factor);
+    }
     if let TextFont::Outline(face) = font
         && let Some(w) = ttf::width(face, s, height, width_factor)
     {
@@ -509,6 +527,7 @@ fn bottom_depth(font: &TextFont, height: f64) -> f64 {
     match font {
         TextFont::Outline(face) => ttf::descent_ratio(face).map_or(height / 3.0, |r| r * height),
         TextFont::Stroke => height / 3.0,
+        TextFont::Shx(f) => f.descent_ratio() * height,
     }
 }
 

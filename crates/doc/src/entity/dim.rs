@@ -52,6 +52,10 @@ pub struct Dimension {
     /// Anonymous block with the rendered geometry (from files); regenerated when edited.
     #[serde(default)]
     pub block: Option<String>,
+    /// Translation of the cached block in WCS (DXF group 12, converted from OCS on read).
+    /// Definition points are already in WCS and must not receive this translation.
+    #[serde(default)]
+    pub block_offset: Vec3,
     /// Per-dimension style overrides (DIMOVERRIDE): DimStyle field names (camelCase) → values,
     /// merged over the named style.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -62,6 +66,15 @@ pub struct Dimension {
     /// Oblique extension lines, jogs, breaks and inspection frames.
     #[serde(default, skip_serializing_if = "DimMarks::is_empty")]
     pub marks: DimMarks,
+}
+
+impl Dimension {
+    /// Discard cached geometry when an edit makes it stale. Regenerated geometry uses the
+    /// definition points directly, so it has no block offset.
+    pub fn clear_block(&mut self) {
+        self.block = None;
+        self.block_offset = Vec3::ZERO;
+    }
 }
 
 /// What dimension edits add to a dimension's drawing: DIMEDIT Oblique, DIMJOGLINE, DIMJOGGED,

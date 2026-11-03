@@ -276,7 +276,7 @@ fn run_find(s: &mut Session, p: &Value) -> Result<Value> {
             doc.modify_entity(h, |e| {
                 e.kind = k;
                 if let EntityKind::Dimension(dm) = &mut e.kind {
-                    dm.block = None;
+                    dm.clear_block();
                 }
             })?;
         }

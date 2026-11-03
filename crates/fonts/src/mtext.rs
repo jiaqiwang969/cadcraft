@@ -154,7 +154,7 @@ struct Fmt {
     over: bool,
     wf: f64,
     oblique: f64,
-    /// `\A`: vertical alignment of tolerance stacks (`^`) on the line: 0 bottom, 1 centre, 2 top.
+    /// `\A`: vertical alignment of this run on its line: 0 bottom, 1 centre, 2 top.
     valign: u8,
 }
 
@@ -175,8 +175,6 @@ enum Atom {
 
 /// Upper bound on parsed atoms (hostile contents).
 const MAX_ATOMS: usize = 200_000;
-/// Scale of stacked text relative to the surrounding text.
-const STACK_SCALE: f64 = 0.7;
 
 fn arg(chars: &[char], from: usize) -> (String, usize) {
     let mut j = from;
@@ -234,6 +232,7 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
     let mut stack: Vec<usize> = Vec::new();
     let mut atoms: Vec<Atom> = Vec::new();
     let mut word: Vec<(Seg, usize)> = Vec::new();
+    let mut shx_cursor = crate::shx::Cursor::default();
     let push_char = |word: &mut Vec<(Seg, usize)>, c: char, f: usize| {
         if let Some((Seg::Text(t), wf)) = word.last_mut()
             && *wf == f
@@ -258,7 +257,7 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
             over: false,
             wf: 1.0,
             oblique: 0.0,
-            valign: 1,
+            valign: 0,
         });
         f(&mut n);
         if fmts.len() < 100_000 {
@@ -279,6 +278,7 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
                     'P' | 'N' => {
                         end_word(&mut atoms, &mut word);
                         atoms.push(Atom::Para(cur));
+                        shx_cursor = crate::shx::Cursor::default();
                     }
                     '~' => push_char(&mut word, '\u{a0}', cur),
                     '\\' | '{' | '}' => push_char(&mut word, code, cur),
@@ -390,14 +390,26 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
             '\n' => {
                 end_word(&mut atoms, &mut word);
                 atoms.push(Atom::Para(cur));
+                shx_cursor = crate::shx::Cursor::default();
                 i += 1;
             }
             ' ' => {
-                end_word(&mut atoms, &mut word);
-                atoms.push(Atom::Space(cur));
+                // Padding between a font's superscript/subscript control glyphs is part
+                // of the same run. Splitting here would lose its saved position and scale.
+                if let Some(Fmt { font: TextFont::Shx(font), .. }) = fmts.get(cur)
+                    && font.track(&mut shx_cursor, c)
+                {
+                    push_char(&mut word, c, cur);
+                } else {
+                    end_word(&mut atoms, &mut word);
+                    atoms.push(Atom::Space(cur));
+                }
                 i += 1;
             }
             _ => {
+                if let Some(Fmt { font: TextFont::Shx(font), .. }) = fmts.get(cur) {
+                    font.track(&mut shx_cursor, c);
+                }
                 push_char(&mut word, c, cur);
                 i += 1;
             }
@@ -411,15 +423,39 @@ fn seg_width(seg: &Seg, f: &Fmt) -> f64 {
     match seg {
         Seg::Text(t) => text_width(&f.font, t, f.height, f.wf),
         Seg::Stack(top, bottom, sep) => {
-            let hs = f.height * STACK_SCALE;
+            let hs = f.height;
             let wt = text_width(&f.font, top, hs, f.wf);
             let wb = text_width(&f.font, bottom, hs, f.wf);
             match sep {
                 '#' => wt + wb + f.height * 0.5,
                 '^' => wt.max(wb),
-                _ => wt.max(wb) + f.height * 0.2,
+                _ => wt.max(wb),
             }
         }
+    }
+}
+
+fn seg_advance(seg: &Seg, f: &Fmt) -> f64 {
+    if let (Seg::Text(t), TextFont::Shx(font)) = (seg, &f.font) { font.advance(t, f.height, f.wf) } else { seg_width(seg, f) }
+}
+
+fn seg_height(seg: &Seg, f: &Fmt) -> f64 {
+    if let (Seg::Text(t), TextFont::Shx(font)) = (seg, &f.font) {
+        return font.height(t, f.height);
+    }
+    match seg {
+        Seg::Text(_) => f.height,
+        Seg::Stack(_, _, '#') => f.height * 2.0,
+        Seg::Stack(..) => f.height * 7.0 / 3.0,
+    }
+}
+
+fn vertical_offset(seg: &Seg, f: &Fmt, line_height: f64) -> f64 {
+    let gap = (line_height - seg_height(seg, f)).max(0.0);
+    match f.valign {
+        1 => gap / 2.0,
+        2 => gap,
+        _ => 0.0,
     }
 }
 
@@ -439,31 +475,26 @@ fn seg_shape(seg: &Seg, f: &Fmt, x: f64) -> Shaped {
     match seg {
         Seg::Text(t) => out.extend(put(t, h, Vec2::new(x, 0.0))),
         Seg::Stack(top, bottom, sep) => {
-            let hs = h * STACK_SCALE;
+            let hs = h;
             let wt = text_width(&f.font, top, hs, f.wf);
             let wb = text_width(&f.font, bottom, hs, f.wf);
             match sep {
                 '#' => {
-                    out.extend(put(top, hs, Vec2::new(x, h * 0.4)));
+                    out.extend(put(top, hs, Vec2::new(x, h)));
                     let sx = x + wt + h * 0.1;
-                    out.extend(put(bottom, hs, Vec2::new(sx + h * 0.4, -h * 0.05)));
+                    out.extend(put(bottom, hs, Vec2::new(sx + h * 0.4, 0.0)));
                     out.strokes.push(vec![Vec2::new(sx, -h * 0.1), Vec2::new(sx + h * 0.3, h * 1.1)]);
                 }
                 '^' => {
-                    // Tolerances: centred on the line, or the lower value on the baseline (\A0) or
-                    // the upper value level with the text (\A2).
-                    let (yt, yb) = match f.valign {
-                        0 => (hs + h * 0.1, 0.0),
-                        2 => (0.0, -hs - h * 0.1),
-                        _ => (h * 0.55, h * 0.45 - hs),
-                    };
-                    out.extend(put(top, hs, Vec2::new(x, yt)));
-                    out.extend(put(bottom, hs, Vec2::new(x, yb)));
+                    // The explicit \H height already is the size of each value. A stack
+                    // has a third-height gap; \A aligns the whole run at line placement.
+                    out.extend(put(top, hs, Vec2::new(x, h * 4.0 / 3.0)));
+                    out.extend(put(bottom, hs, Vec2::new(x, 0.0)));
                 }
                 _ => {
-                    let bar = h * 0.45;
-                    out.extend(put(top, hs, Vec2::new(x + (w - wt) / 2.0, bar + h * 0.12)));
-                    out.extend(put(bottom, hs, Vec2::new(x + (w - wb) / 2.0, bar - h * 0.12 - hs)));
+                    let bar = h * 7.0 / 6.0;
+                    out.extend(put(top, hs, Vec2::new(x + (w - wt) / 2.0, h * 4.0 / 3.0)));
+                    out.extend(put(bottom, hs, Vec2::new(x + (w - wb) / 2.0, 0.0)));
                     out.strokes.push(vec![Vec2::new(x, bar), Vec2::new(x + w, bar)]);
                 }
             }
@@ -499,6 +530,8 @@ struct Item {
 struct Line {
     items: Vec<Item>,
     width: f64,
+    /// Pen advance, including SHX letter spacing after the last visible stroke.
+    advance: f64,
     max_h: f64,
     text: String,
     /// Running character count of `text`, kept incrementally so appending a segment need not
@@ -567,30 +600,37 @@ fn plain_lines(atoms: &[Atom], fmts: &[Fmt], base: &Fmt, width: f64) -> Vec<Line
                 last_fmt = *format;
             }
             Atom::Word(segments) => {
-                let word_width: f64 = segments.iter().map(|(segment, format)| seg_width(segment, fmt(*format))).sum();
+                let mut pen = 0.0_f64;
+                let mut word_width = 0.0_f64;
+                for (segment, format) in segments {
+                    word_width = word_width.max(pen + seg_width(segment, fmt(*format)));
+                    pen += seg_advance(segment, fmt(*format));
+                }
                 let space_width =
                     pending_space.map(|format| crate::space_width(&fmt(format).font, fmt(format).height, fmt(format).wf)).unwrap_or(0.0);
-                if width > 0.0 && !line.items.is_empty() && line.width + space_width + word_width > width + 1e-9 {
+                if width > 0.0 && !line.items.is_empty() && line.advance + space_width + word_width > width + 1e-9 {
                     finish(&mut lines, &mut line, fmt(last_fmt), paragraph);
                 } else if !line.items.is_empty() || pending_space.is_some() {
                     if let Some(format) = pending_space {
                         let at = line.chars;
-                        line.items.push(Item { seg: None, fmt: format, x: line.width, w: space_width, at });
+                        line.items.push(Item { seg: None, fmt: format, x: line.advance, w: space_width, at });
                         line.text.push(' ');
                         line.chars += 1;
                     }
-                    line.width += space_width;
+                    line.advance += space_width;
+                    line.width = line.width.max(line.advance);
                 }
                 pending_space = None;
                 for (segment, format) in segments {
                     let segment_width = seg_width(segment, fmt(*format));
-                    line.max_h = line.max_h.max(fmt(*format).height);
+                    line.max_h = line.max_h.max(seg_height(segment, fmt(*format)));
                     let at = line.chars;
                     let plain = seg_plain(segment);
                     line.chars += plain.chars().count();
                     line.text.push_str(&plain);
-                    line.items.push(Item { seg: Some(segment.clone()), fmt: *format, x: line.width, w: segment_width, at });
-                    line.width += segment_width;
+                    line.items.push(Item { seg: Some(segment.clone()), fmt: *format, x: line.advance, w: segment_width, at });
+                    line.width = line.width.max(line.advance + segment_width);
+                    line.advance += seg_advance(segment, fmt(*format));
                     last_fmt = *format;
                 }
             }
@@ -607,7 +647,7 @@ pub fn layout_mtext_with(contents: &str, p: &MTextParams) -> MTextLayout {
     let wf = if p.width_factor.is_finite() && p.width_factor > 0.0 { p.width_factor } else { 1.0 };
     let width = if p.width.is_finite() && p.width > 0.0 { p.width } else { 0.0 };
     let rotation = if p.rotation.is_finite() { p.rotation } else { 0.0 };
-    let base = Fmt { font: p.font.clone(), height: h, color: None, under: false, over: false, wf, oblique: p.oblique, valign: 1 };
+    let base = Fmt { font: p.font.clone(), height: h, color: None, under: false, over: false, wf, oblique: p.oblique, valign: 0 };
     let (atoms, fmts) = parse(contents, base.clone());
     if para::needed(contents, p) {
         return para::layout(contents, p, &base);
@@ -667,7 +707,7 @@ pub fn layout_mtext_with(contents: &str, p: &MTextParams) -> MTextLayout {
             let Some(sg) = &it.seg else { continue };
             let fm = fmt(it.fmt);
             let mut sh = seg_shape(sg, fm, it.x);
-            let off = Vec2::new(x0, top + base_y);
+            let off = Vec2::new(x0, top + base_y + vertical_offset(sg, fm, l.max_h));
             sh.map(|q| xf(q + off));
             match out.pieces.last_mut() {
                 Some(pc) if pc.color == fm.color => pc.shaped.extend(sh),
@@ -785,18 +825,40 @@ mod tests {
     }
 
     #[test]
-    fn stacked_fraction_is_small_over_large() {
+    fn stacked_fraction_keeps_explicit_height_and_expands_line() {
         let l = lay("\\S1/2;", 0.0);
         assert_eq!(l.lines, vec!["1/2"]);
         // A horizontal bar plus numerator above it and denominator below.
-        let bar = l.strokes.iter().find(|s| s.len() == 2 && (s[0].y - s[1].y).abs() < 1e-12 && (s[0].y + 0.55).abs() < 1e-9);
+        let bar = l.strokes.iter().find(|s| s.len() == 2 && (s[0].y - s[1].y).abs() < 1e-12 && (s[0].y + 7.0 / 6.0).abs() < 1e-9);
         assert!(bar.is_some());
         let ys: Vec<f64> = l.strokes.iter().flatten().map(|p| p.y).collect();
         let max = ys.iter().cloned().fold(f64::MIN, f64::max);
         let min = ys.iter().cloned().fold(f64::MAX, f64::min);
-        assert!(max > 0.0 && min < -1.0, "{min}..{max}");
+        assert!(max.abs() < 1e-9 && (min + 7.0 / 3.0).abs() < 1e-9, "{min}..{max}");
         // Narrower than the two digits side by side at full size.
         assert!(l.bounds.width() < crate::line_width("12", 1.0, 1.0));
+    }
+
+    #[test]
+    fn explicit_tolerance_height_and_line_alignment_are_not_scaled_twice() {
+        // Black-box reference: height 10 with \H0.625x yields two 6.25-high values,
+        // separated by 6.25/3. The complete stack is 14.583333 high. \A aligns the
+        // normal-height text within that line, rather than shifting the stack alone.
+        let total = 6.25 * 7.0 / 3.0;
+        for align in 0..=2 {
+            let text = format!("\\A{align};{{\\C1;A}}{{\\C2;\\H0.625x;\\SA^A;}}");
+            let params = MTextParams::new(Vec2::ZERO, 10.0);
+            let l = layout_mtext_with(&text, &params);
+            assert!((l.bounds.height() - total).abs() < 1e-9);
+            let normal = l.pieces.iter().find(|p| p.color == Some(MTextColor::Aci(1))).unwrap();
+            let stack = l.pieces.iter().find(|p| p.color == Some(MTextColor::Aci(2))).unwrap();
+            let nb = Bounds2::from_points(normal.shaped.strokes.iter().flatten().copied());
+            let sb = Bounds2::from_points(stack.shaped.strokes.iter().flatten().copied());
+            assert!((sb.height() - total).abs() < 1e-9);
+            assert!((nb.height() - 10.0).abs() < 1e-9);
+            assert!((nb.min.y - (-total + f64::from(align) * (total - 10.0) / 2.0)).abs() < 1e-9);
+            assert!(sb.max.y.abs() < 1e-9);
+        }
     }
 
     #[test]

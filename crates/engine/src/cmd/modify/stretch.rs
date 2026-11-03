@@ -71,7 +71,7 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
             for p in [&mut dm.p13, &mut dm.p14, &mut dm.defpt, &mut dm.text_mid] {
                 mv(p);
             }
-            dm.block = None;
+            dm.clear_block();
         }
         k => {
             let g = k.grips();

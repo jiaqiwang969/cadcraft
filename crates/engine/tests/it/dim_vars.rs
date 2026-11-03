@@ -257,20 +257,38 @@ fn setvar_refuses_the_values_the_style_refuses() {
 
 #[test]
 fn tolerance_justification_angular_zeros_and_arc_symbol() {
-    let mut s = Session::new();
-    set(&mut s, "DIMTOL", json!(1));
-    set(&mut s, "DIMTP", json!(0.1));
-    set(&mut s, "DIMTM", json!(0.2));
-    linear(&mut s, 10.0);
-    let (_, middle) = last_dim(&s);
-    assert!(!middle.mtext.contains("\\A"));
-    set(&mut s, "DIMTOLJ", json!(0));
-    linear(&mut s, 10.0);
-    let (_, bottom) = last_dim(&s);
-    assert!(bottom.mtext.contains("\\A0;"), "{}", bottom.mtext);
-    // Bottom alignment: the lower tolerance sits on the baseline, higher than when centred.
-    let low = |g: &DimGeometry| g.text.iter().flatten().map(|p| p.y).fold(f64::INFINITY, f64::min);
-    assert!(low(&bottom) > low(&middle) + 1e-6);
+    use cadcraft_fonts::{MTextColor, MTextParams, layout_mtext_with};
+    use cadcraft_geom::Bounds2;
+
+    // Exercise stacks both shorter and taller than the nominal value. The two
+    // runs must share their bottom, centre or top; global bounds alone cannot
+    // distinguish alignment after the line's attachment point is normalized.
+    for factor in [0.25, 0.625, 1.0] {
+        for align in 0..=2 {
+            let mut s = Session::new();
+            set(&mut s, "DIMTOL", json!(1));
+            set(&mut s, "DIMTP", json!(0.1));
+            set(&mut s, "DIMTM", json!(0.2));
+            set(&mut s, "DIMTFAC", json!(factor));
+            set(&mut s, "DIMTOLJ", json!(align));
+            linear(&mut s, 10.0);
+            let (_, g) = last_dim(&s);
+            assert!(g.mtext.starts_with(&format!("\\A{align};")), "{}", g.mtext);
+            // Add only run colors to the generated text, so actual glyph bounds
+            // can be compared without guessing stroke indices or altering layout.
+            let colored = format!("\\C1;{}", g.mtext.replacen("{\\H", "{\\C2;\\H", 1));
+            let layout = layout_mtext_with(&colored, &MTextParams::new(Vec2::ZERO, 10.0));
+            let bounds = |color| {
+                Bounds2::from_points(layout.pieces.iter().filter(|p| p.color == color).flat_map(|p| p.shaped.strokes.iter().flatten().copied()))
+            };
+            let nominal = bounds(Some(MTextColor::Aci(1)));
+            let tolerance = bounds(Some(MTextColor::Aci(2)));
+            assert!((nominal.height() - 10.0).abs() < 1e-9, "{nominal:?}");
+            assert!((tolerance.height() - 10.0 * factor * 7.0 / 3.0).abs() < 1e-9, "{tolerance:?}");
+            let at = |b: Bounds2| b.min.y + f64::from(align) * b.height() / 2.0;
+            assert!((at(nominal) - at(tolerance)).abs() < 1e-9, "factor {factor}, alignment {align}: {nominal:?} / {tolerance:?}");
+        }
+    }
 
     // DIMAZIN 2 drops trailing zeros of angles.
     let mut s = Session::new();

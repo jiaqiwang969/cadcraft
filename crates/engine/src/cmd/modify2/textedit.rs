@@ -27,7 +27,7 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
         EntityKind::MText(t) => t.contents = text.replace('\n', "\\P"),
         EntityKind::Dimension(d) => {
             d.text = if text == "<>" { String::new() } else { text.to_string() };
-            d.block = None;
+            d.clear_block();
         }
         _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
     }

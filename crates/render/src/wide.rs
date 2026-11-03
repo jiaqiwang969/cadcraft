@@ -18,10 +18,9 @@ struct Sample {
 /// does; distances start at 0 for each segment.
 fn segments(p: &LwPolyline, tol: f64) -> Vec<Vec<Sample>> {
     let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
-    let n = p.vertices.len();
     let mut out = Vec::new();
-    for (i, seg) in pl.segments().iter().enumerate() {
-        let v = p.vertices.get(i % n.max(1)).copied().unwrap_or_default();
+    for (i, seg) in pl.indexed_segments() {
+        let Some(v) = p.vertices.get(i) else { continue };
         let (w0, w1) = if p.const_width > 0.0 { (p.const_width, p.const_width) } else { (v.start_width, v.end_width) };
         let mut pts = Vec::new();
         seg.tessellate(tol, &mut pts);
@@ -46,9 +45,10 @@ fn segments(p: &LwPolyline, tol: f64) -> Vec<Vec<Sample>> {
     out
 }
 
-/// The sample at distance `s` along `run` (clamped to its ends).
-fn at(run: &[Sample], s: f64) -> Option<Sample> {
-    let i = run.partition_point(|x| x.s <= s).saturating_sub(1);
+/// The sample at distance `s` along `run` (clamped to its ends). At a shared vertex,
+/// a dash ends with the preceding segment's width and starts with the following one's.
+fn at(run: &[Sample], s: f64, end: bool) -> Option<Sample> {
+    let i = run.partition_point(|x| if end { x.s < s } else { x.s <= s }).saturating_sub(1);
     let a = *run.get(i)?;
     let Some(b) = run.get(i + 1).copied() else { return Some(a) };
     let len = b.s - a.s;
@@ -67,7 +67,7 @@ fn edges(x: &Sample) -> (Vec2, Vec2) {
 }
 
 /// Triangles for the dashes of a wide polyline drawn with `lt` at `scale`, a line across the band
-/// for each dot, and the centre line of each dash. With PLINEGEN the pattern runs along the whole
+/// for each dot plus any zero-width dash, and the centre line of each wide dash. With PLINEGEN the pattern runs along the whole
 /// polyline; otherwise it restarts at every vertex. A pattern shorter than `min_pattern` fills
 /// the whole band.
 pub fn dashed(p: &LwPolyline, tol: f64, lt: &Linetype, scale: f64, min_pattern: f64) -> (Vec<Vec2>, Vec<Vec<Vec2>>, Vec<Vec<Vec2>>) {
@@ -88,27 +88,59 @@ pub fn dashed(p: &LwPolyline, tol: f64, lt: &Linetype, scale: f64, min_pattern: 
         let dashes = linetype::ranges(len, lt, scale, min_pattern).unwrap_or_else(|| vec![(0.0, len)]);
         for (a, b) in dashes {
             if b - a <= 1e-12 {
-                if let Some(x) = at(run, a) {
+                if let Some(x) = at(run, a, false) {
                     let (l, r) = edges(&x);
                     ticks.push(if x.hw > 0.0 { vec![l, r] } else { vec![x.p] });
                 }
                 continue;
             }
-            let (Some(first), Some(last)) = (at(run, a), at(run, b)) else { continue };
+            let (Some(first), Some(last)) = (at(run, a, false), at(run, b, true)) else { continue };
             let inner = run.iter().filter(|x| x.s > a && x.s < b).copied();
             let pts: Vec<Sample> = std::iter::once(first).chain(inner).chain(std::iter::once(last)).collect();
-            for w in pts.windows(2) {
-                if let [x, y] = w {
-                    let (a0, a1) = edges(x);
-                    let (b0, b1) = edges(y);
-                    tris.extend_from_slice(&[a0, a1, b1, a0, b1, b0]);
-                }
-            }
-            centres.push(pts.iter().map(|x| x.p).collect());
+            dash_geometry(&pts, &mut tris, &mut ticks, &mut centres);
             if tris.len() > 6_000_000 {
                 return (tris, ticks, centres);
             }
         }
     }
     (tris, ticks, centres)
+}
+
+/// Split a dash at changes between zero and nonzero width. Keeping the thin pieces separate
+/// preserves lineweight/transparency without stroking over a filled band.
+fn dash_geometry(pts: &[Sample], tris: &mut Vec<Vec2>, strokes: &mut Vec<Vec<Vec2>>, centres: &mut Vec<Vec<Vec2>>) {
+    let mut thin = Vec::new();
+    let mut wide = Vec::new();
+    for pair in pts.windows(2) {
+        let [x, y] = pair else { continue };
+        if y.s <= x.s {
+            continue;
+        }
+        if x.hw == 0.0 && y.hw == 0.0 {
+            if !wide.is_empty() {
+                centres.push(std::mem::take(&mut wide));
+            }
+            if thin.is_empty() {
+                thin.push(x.p);
+            }
+            thin.push(y.p);
+        } else {
+            if !thin.is_empty() {
+                strokes.push(std::mem::take(&mut thin));
+            }
+            if wide.is_empty() {
+                wide.push(x.p);
+            }
+            wide.push(y.p);
+            let (a0, a1) = edges(x);
+            let (b0, b1) = edges(y);
+            tris.extend_from_slice(&[a0, a1, b1, a0, b1, b0]);
+        }
+    }
+    if !thin.is_empty() {
+        strokes.push(thin);
+    }
+    if !wide.is_empty() {
+        centres.push(wide);
+    }
 }

@@ -334,9 +334,18 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
     if let EntityKind::Dimension(dm) = &e.kind {
         w.s(0, "DIMENSION");
         common_x(w, e, owner, paper, "AcDbDimension", cx.assoc.get(&e.handle));
-        let bname = cx.dim_blocks.get(&e.handle).cloned().or_else(|| dm.block.clone()).unwrap_or_default();
+        let (bname, offset) = cx
+            .dim_blocks
+            .get(&e.handle)
+            .map(|(name, offset)| (name.as_str(), *offset))
+            .unwrap_or((dm.block.as_deref().unwrap_or_default(), dm.block_offset));
         w.s(2, bname);
         w.p(10, dm.defpt);
+        // Retained cached blocks need their translation; regenerated blocks are already in WCS.
+        // This writer emits the default Z extrusion, so WCS is also the output's OCS here.
+        if !bname.is_empty() && offset != Vec3::ZERO {
+            w.p(12, offset);
+        }
         let style = d.dim_style(&dm.style).cloned().unwrap_or_default();
         let g = cadcraft_render::dimension_geometry(dm, &style, d.header.f64("DIMSCALE", 1.0));
         w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(0.0) });

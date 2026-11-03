@@ -44,6 +44,7 @@ fn dimensions_take_the_viewport_layer_colour() {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),

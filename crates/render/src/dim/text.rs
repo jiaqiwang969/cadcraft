@@ -32,9 +32,10 @@ pub(super) fn linear_text(meas: f64, d: &Dimension, st: &DimStyle, prefix: &str)
             let sign = |x: &str, pos: char| if x.trim_start_matches(['0', '.', ',']).is_empty() { x.to_string() } else { format!("{pos}{x}") };
             let (plus, minus) =
                 (sign(&plus, '+'), if st.tol_minus < 0.0 { format!("+{}", minus.trim_start_matches('-')) } else { sign(&minus, '-') });
-            // DIMTOLJ: bottom / middle / top (MTEXT `\A`; middle is the default).
-            let tolj = if st.tol_just == 1 { String::new() } else { format!("\\A{};", st.tol_just.min(2)) };
-            s += &format!("{{\\H{};{tolj}\\S{plus}^{minus};}}", tol_height_code(st));
+            // DIMTOLJ aligns both runs on their shared line. Apply it before the
+            // nominal value too: either the nominal or the stack may be taller.
+            // MTEXT defaults to bottom alignment, while DIMTOLJ defaults to middle.
+            s = format!("\\A{};{s}{{\\H{};\\S{plus}^{minus};}}", st.tol_just.min(2), tol_height_code(st));
         }
     }
     if st.alt {
@@ -60,10 +61,12 @@ pub(super) fn inspected(value: String, d: &Dimension) -> String {
     }
 }
 
-/// `\H` code for stacked tolerance parts (DIMTFAC relative to the 70% stack scale).
+/// `\H` code for each stacked tolerance value (DIMTFAC relative to nominal height).
+/// The MTEXT layout already honors explicit heights; do not compensate for a
+/// second, implicit stack reduction.
 fn tol_height_code(st: &DimStyle) -> String {
     let f = if st.tol_scale.is_finite() && st.tol_scale > 0.0 { st.tol_scale } else { 1.0 };
-    format!("{}x", format_decimal(f / 0.7, 4, 8, "."))
+    format!("{}x", format_decimal(f, 4, 8, "."))
 }
 
 /// Apply measurement placeholders or append a dimension suffix, bounding the resulting UTF-8 text.

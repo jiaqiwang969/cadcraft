@@ -7,7 +7,9 @@
 
 use cadcraft_geom::{Bounds2, Vec2};
 
-use super::{Atom, Fmt, MTextLayout, MTextParams, MTextPiece, Seg, arg, num, parse, seg_plain, seg_shape, seg_width};
+use super::{
+    Atom, Fmt, MTextLayout, MTextParams, MTextPiece, Seg, arg, num, parse, seg_advance, seg_height, seg_plain, seg_shape, seg_width, vertical_offset,
+};
 
 /// Columns an MTEXT's text flows through, each as wide as the MTEXT's width.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -361,6 +363,7 @@ struct PLine {
     items: Vec<Item>,
     /// Right end of the content.
     width: f64,
+    advance: f64,
     max_h: f64,
     text: String,
     gaps: usize,
@@ -425,7 +428,7 @@ impl<'a> LineBuilder<'a> {
             width,
             height,
             lines: Vec::new(),
-            line: PLine { width: (first.left + first.first).max(0.0), ..Default::default() },
+            line: PLine { width: (first.left + first.first).max(0.0), advance: (first.left + first.first).max(0.0), ..Default::default() },
             paragraph: 0,
             pending_space: None,
             last_format: 0,
@@ -474,7 +477,7 @@ impl<'a> LineBuilder<'a> {
         }
         self.line.para = self.paragraph;
         self.line.para_end = paragraph_end;
-        let next = PLine { width: next_start, ..Default::default() };
+        let next = PLine { width: next_start, advance: next_start, ..Default::default() };
         self.lines.push(std::mem::replace(&mut self.line, next));
     }
 
@@ -508,12 +511,18 @@ impl<'a> LineBuilder<'a> {
             self.finish(false, left);
         } else {
             self.line.width = x;
+            self.line.advance = x;
             self.line.text.push(' ');
         }
     }
 
     fn push_text(&mut self, index: usize, segments: &[(Seg, usize)]) {
-        let word_width: f64 = segments.iter().map(|(segment, format)| seg_width(segment, self.format(*format))).sum();
+        let mut pen = 0.0_f64;
+        let mut word_width = 0.0_f64;
+        for (segment, format) in segments {
+            word_width = word_width.max(pen + seg_width(segment, self.format(*format)));
+            pen += seg_advance(segment, self.format(*format));
+        }
         let space_width = if index == 0 {
             self.pending_space
                 .map(|format| crate::space_width(&self.format(format).font, self.format(format).height, self.format(format).wf))
@@ -525,10 +534,11 @@ impl<'a> LineBuilder<'a> {
             let props = self.paragraphs.props(self.paragraph);
             (self.available_width(props), props.left.max(0.0))
         };
-        if self.width > 0.0 && !self.line.items.is_empty() && self.line.width + space_width + word_width > available + 1e-9 {
+        if self.width > 0.0 && !self.line.items.is_empty() && self.line.advance + space_width + word_width > available + 1e-9 {
             self.finish(false, left);
         } else if index == 0 && (!self.line.items.is_empty() || self.pending_space.is_some()) {
-            self.line.width += space_width;
+            self.line.advance += space_width;
+            self.line.width = self.line.width.max(self.line.advance);
             if self.pending_space.is_some() {
                 self.line.text.push(' ');
                 self.line.gaps += 1;
@@ -537,10 +547,11 @@ impl<'a> LineBuilder<'a> {
         self.pending_space = None;
         for (segment, format) in segments {
             let segment_width = seg_width(segment, self.format(*format));
-            self.line.max_h = self.line.max_h.max(self.format(*format).height);
+            self.line.max_h = self.line.max_h.max(seg_height(segment, self.format(*format)));
             self.line.text.push_str(&seg_plain(segment));
-            self.line.items.push(Item { seg: segment.clone(), fmt: *format, x: self.line.width, gap: self.line.gaps });
-            self.line.width += segment_width;
+            self.line.items.push(Item { seg: segment.clone(), fmt: *format, x: self.line.advance, gap: self.line.gaps });
+            self.line.width = self.line.width.max(self.line.advance + segment_width);
+            self.line.advance += seg_advance(segment, self.format(*format));
             self.last_format = *format;
         }
     }
@@ -668,7 +679,7 @@ pub(super) fn layout(contents: &str, p: &MTextParams, base: &Fmt) -> MTextLayout
         for it in &l.items {
             let fm = fmt(it.fmt);
             let mut sh = seg_shape(&it.seg, fm, it.x);
-            let off = Vec2::new(col_x + shift + per_gap * it.gap as f64, top + base_y);
+            let off = Vec2::new(col_x + shift + per_gap * it.gap as f64, top + base_y + vertical_offset(&it.seg, fm, l.max_h));
             sh.map(|q| xf(q + off));
             match out.pieces.last_mut() {
                 Some(pc) if pc.color == fm.color => pc.shaped.extend(sh),

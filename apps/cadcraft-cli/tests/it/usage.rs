@@ -818,7 +818,9 @@ fn non_unicode_arguments() {
     assert!(err.starts_with("error: invalid UTF-8 was detected"), "{err}");
 }
 
-/// An output name that isn't valid Unicode is written as given: only its extension picks the format.
+/// Output names reach the filesystem unchanged. Unix filesystems accepting arbitrary bytes
+/// can write them; a macOS filesystem rejecting the name must report that error without
+/// silently creating a replacement-character filename.
 #[cfg(unix)]
 #[test]
 fn non_unicode_output_names() {
@@ -835,6 +837,11 @@ fn non_unicode_output_names() {
         let code = cadcraft_cli::run(args, &mut out, &mut err);
         (code, String::from_utf8_lossy(&err).into_owned())
     };
+    let name_error = match std::fs::write(latin1("probe"), b"filesystem name probe") {
+        Ok(()) => None,
+        Err(e) if cfg!(target_os = "macos") && e.raw_os_error() == Some(92) => Some(e.to_string()),
+        Err(e) => panic!("unexpected filesystem probe error: {e}"),
+    };
     let b = s.0.join("b.dxf");
     let cases: [(Vec<OsString>, std::path::PathBuf); 3] = [
         (vec!["sample".into(), "bracket".into(), latin1("dxf").into()], latin1("dxf")),
@@ -843,9 +850,16 @@ fn non_unicode_output_names() {
     ];
     for (args, path) in cases {
         let (code, err) = run(args.clone());
-        assert_eq!(code, 0, "{args:?}: {err}");
-        assert!(path.exists(), "{path:?}");
-        assert!(std::fs::metadata(&path).expect("stat output").len() > 0, "{path:?}");
+        if let Some(message) = &name_error {
+            assert_eq!(code, 1, "{args:?}: {err}");
+            assert!(err.contains(message), "{args:?}: {err}");
+            assert!(!path.exists(), "filesystem rejected {path:?}");
+            assert!(!Path::new(path.to_string_lossy().as_ref()).exists(), "must not rewrite the filename");
+        } else {
+            assert_eq!(code, 0, "{args:?}: {err}");
+            assert!(path.exists(), "{path:?}");
+            assert!(std::fs::metadata(&path).expect("stat output").len() > 0, "{path:?}");
+        }
     }
     // An input with such a name is still refused.
     let (code, err) = run(vec!["info".into(), latin1("dxf").into()]);

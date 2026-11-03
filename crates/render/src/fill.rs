@@ -116,18 +116,24 @@ fn crossing_y(l: &(f64, f64, f64), r: &(f64, f64, f64), ya: f64, yb: f64) -> Opt
     (y > ya && y < yb && y - ya > 1e-12 && yb - y > 1e-12).then_some(y)
 }
 
-/// Triangles for a polyline with widths (constant or tapered per segment).
-pub fn wide_polyline(p: &LwPolyline, tol: f64) -> Vec<Vec2> {
+/// Filled bands, zero-width strokes, and wide-segment centre lines of a polyline.
+/// A zero-width segment is a normal stroked curve, not an empty filled polygon.
+pub fn wide_polyline(p: &LwPolyline, tol: f64) -> (Vec<Vec2>, Vec<Vec<Vec2>>, Vec<Vec<Vec2>>) {
     let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
     let mut out = Vec::new();
-    let n = p.vertices.len();
-    for (i, seg) in pl.segments().iter().enumerate() {
-        let v = p.vertices.get(i % n.max(1)).copied().unwrap_or_default();
+    let mut strokes = Vec::new();
+    let mut centres = Vec::new();
+    for (i, seg) in pl.indexed_segments() {
+        let Some(v) = p.vertices.get(i) else { continue };
         let (w0, w1) = if p.const_width > 0.0 { (p.const_width, p.const_width) } else { (v.start_width, v.end_width) };
         let mut pts = Vec::new();
         seg.tessellate(tol, &mut pts);
         let m = pts.len();
         if m < 2 {
+            continue;
+        }
+        if w0 == 0.0 && w1 == 0.0 {
+            strokes.push(pts);
             continue;
         }
         let mut prev: Option<(Vec2, Vec2)> = None;
@@ -144,8 +150,9 @@ pub fn wide_polyline(p: &LwPolyline, tol: f64) -> Vec<Vec2> {
             }
             prev = Some(cur);
         }
+        centres.push(pts);
     }
-    out
+    (out, strokes, centres)
 }
 
 #[cfg(test)]

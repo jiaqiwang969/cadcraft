@@ -24,6 +24,7 @@ fn dim(kind: DimKind, defpt: Vec3, p13: Vec3, p14: Vec3, p15: Vec3, p16: Vec3, a
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc,
         marks: Default::default(),

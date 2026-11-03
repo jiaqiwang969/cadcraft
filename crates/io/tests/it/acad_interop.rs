@@ -95,6 +95,7 @@ fn s25(kind: DimKind, p13: Vec3, p14: Vec3, defpt: Vec3) -> Drawing {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),

@@ -23,6 +23,7 @@ fn dimension() -> Dimension {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
@@ -160,6 +161,24 @@ fn a_dimension_read_with_its_block_keeps_the_block_and_gets_the_background() {
     let pts = list.points(&list.prims[mask]);
     let mid = pts.iter().fold(Vec2::ZERO, |s, p| s + *p) * (1.0 / pts.len() as f64);
     assert!(mid.dist(Vec2::new(20.0, 20.0)) < 0.05, "{mid:?}");
+
+    let offset = Vec2::new(100.0, -200.0);
+    let h = d.model.iter().next().unwrap().handle;
+    d.modify_entity(h, |e| {
+        if let EntityKind::Dimension(dm) = &mut e.kind {
+            dm.block_offset = offset.to3(0.0);
+        }
+    })
+    .unwrap();
+    let moved = build(&d, &Space::Model, &Options::default());
+    assert_eq!(list.prims.len(), moved.prims.len());
+    for (a, b) in list.prims.iter().zip(&moved.prims) {
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(list.points(a).len(), moved.points(b).len());
+        for (p, q) in list.points(a).iter().zip(moved.points(b)) {
+            assert!(q.dist(*p + offset) < 1e-9, "background and text must move together");
+        }
+    }
 }
 
 #[test]

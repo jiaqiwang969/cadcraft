@@ -7,7 +7,12 @@ use super::{Builder, Color, Ctx, DimGeometry, DimText, Drawing, Entity, EntityKi
 /// The font settings of a dimension style's text style.
 pub fn dim_text(d: &Drawing, st: &cadcraft_doc::DimStyle) -> DimText {
     let ts = text_style(d, &st.text_style);
-    DimText { font: cadcraft_fonts::TextFont::resolve(&ts.font), fixed_height: ts.height, width_factor: ts.width_factor, oblique: ts.oblique }
+    DimText {
+        font: cadcraft_fonts::TextFont::resolve_style(&ts.font, &ts.big_font, &d.header.str("DWGCODEPAGE", "")),
+        fixed_height: ts.height,
+        width_factor: ts.width_factor,
+        oblique: ts.oblique,
+    }
 }
 
 /// Geometry of a dimension in a drawing: its style, overrides and text font.
@@ -116,11 +121,11 @@ pub(crate) fn dim_text_fill(b: &mut Builder, ctx: &Ctx, e: &Entity, style: &cadc
 
 /// A dimension block's text, or a line that is a segment of one of the text's marks in `g`
 /// (as the `*D` block writer splits them): where the background goes.
-pub(crate) fn starts_text_marks(be: &Entity, g: &DimGeometry) -> bool {
+pub(crate) fn starts_text_marks(be: &Entity, g: &DimGeometry, block_offset: Vec2) -> bool {
     match &be.kind {
         EntityKind::MText(_) | EntityKind::Text(_) => true,
         EntityKind::Line(l) => {
-            let (a, b) = (l.a.xy(), l.b.xy());
+            let (a, b) = (l.a.xy() + block_offset, l.b.xy() + block_offset);
             g.text_marks
                 .iter()
                 .filter_map(|i| g.lines.get(*i))

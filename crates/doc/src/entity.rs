@@ -378,7 +378,7 @@ impl EntityKind {
                     *rotation = cadcraft_geom::norm_angle(*rotation + rot);
                 }
                 d.marks.transform(&t3, rot, s, mirror);
-                d.block = None;
+                d.clear_block();
             }
             EntityKind::MLine(ml) => {
                 ml.vertices.iter_mut().for_each(|v| t3(&mut v.p));

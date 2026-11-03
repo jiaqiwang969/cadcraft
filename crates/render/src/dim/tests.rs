@@ -16,6 +16,7 @@ fn lin(p1: (f64, f64), p2: (f64, f64), on: (f64, f64), rot: f64) -> Dimension {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
