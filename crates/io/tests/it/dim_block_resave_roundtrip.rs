@@ -24,6 +24,7 @@ fn linear(a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Dimension {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
@@ -232,7 +233,7 @@ fn an_unedited_dimension_keeps_the_block_it_was_read_with() {
     edited
         .modify_entity(h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind {
-                dm.block = None;
+                dm.clear_block();
             }
         })
         .unwrap();

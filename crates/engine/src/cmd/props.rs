@@ -391,15 +391,15 @@ fn set_dimension_properties(
 ) {
     if let Some(v) = str_param(params, "textOverride") {
         dimension.text = v.to_string();
-        dimension.block = None;
+        dimension.clear_block();
     }
     if let Some(st) = style {
         dimension.style.clone_from(st);
-        dimension.block = None;
+        dimension.clear_block();
     }
     if !overrides.is_empty() {
         dimension.overrides.extend(overrides.clone());
-        dimension.block = None;
+        dimension.clear_block();
     }
 }
 
@@ -1065,7 +1065,7 @@ pub(super) fn dim_override(s: &mut Session, p: &Value) -> Result<Value> {
                 for (k, v) in &good {
                     dm.overrides.insert(k.clone(), v.clone());
                 }
-                dm.block = None;
+                dm.clear_block();
                 n += 1;
             }
         })?;

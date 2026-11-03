@@ -703,10 +703,11 @@ impl Sink<'_> {
     fn dimension(&mut self, d: &Drawing, dm: &cadcraft_doc::Dimension, budget: &mut usize, frozen: &[String]) {
         match dm.block.as_ref().and_then(|n| d.block(n)) {
             Some(blk) => {
-                // The block holds world geometry: a reference at its own base point places it as is.
+                // Dimension blocks use a translation from their cached coordinates; cancel the
+                // INSERT base-point subtraction before applying that translation.
                 let ins = Insert {
                     block: blk.name.clone(),
-                    insert: blk.base,
+                    insert: blk.base + dm.block_offset,
                     scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
                     rotation: 0.0,
                     attribs: Vec::new(),

@@ -165,6 +165,11 @@ impl<'a> Signer<'a> {
         // cached measurement, and its text position unless the user placed the text.
         if let (Some(o), EntityKind::Dimension(dm)) = (v.as_object_mut(), k) {
             o.remove("block");
+            // A plain geometry comparison ignores the cached representation. Comparisons
+            // including block contents must retain the offset that places those contents.
+            if self.frames.is_none() || dm.block.is_none() {
+                o.remove("blockOffset");
+            }
             o.remove("measurement");
             if !dm.user_text_pos {
                 o.remove("textMid");

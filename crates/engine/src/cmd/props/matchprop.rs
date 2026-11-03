@@ -168,7 +168,7 @@ fn copy_props(src: &Entity, dst: &mut Entity, m: &MatchProps) {
         (EntityKind::Dimension(a), EntityKind::Dimension(b)) if m.dimension => {
             b.style.clone_from(&a.style);
             b.overrides.clone_from(&a.overrides);
-            b.block = None;
+            b.clear_block();
         }
         (EntityKind::Leader(a), EntityKind::Leader(b)) if m.dimension => b.style.clone_from(&a.style),
         (EntityKind::Text(a), EntityKind::Text(b)) if m.text => {

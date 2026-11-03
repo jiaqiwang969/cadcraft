@@ -115,6 +115,7 @@ pub(crate) fn dimensions() -> Vec<Case> {
                     text_rotation: 0.0,
                     user_text_pos: true,
                     block: Some("*D42".into()),
+                    block_offset: Default::default(),
                     overrides: Default::default(),
                     assoc: Vec::new(),
                     marks: DimMarks::default(),

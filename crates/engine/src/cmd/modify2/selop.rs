@@ -91,7 +91,7 @@ pub(crate) fn flatten_kind(k: &mut EntityKind) {
             for p in [&mut d.defpt, &mut d.text_mid, &mut d.p13, &mut d.p14, &mut d.p15, &mut d.p16] {
                 z(p);
             }
-            d.block = None;
+            d.clear_block();
         }
         EntityKind::Leader(l) => l.vertices.iter_mut().for_each(z),
         EntityKind::MLine(m) => m.vertices.iter_mut().for_each(|v| z(&mut v.p)),

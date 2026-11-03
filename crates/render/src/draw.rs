@@ -141,7 +141,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                 // a transparent band gets none (its alpha would add up along the centre).
                 let hairline = !b.plotting && b.opts.min_dash > 0.0 && b.transparency == 0;
                 match &lt {
-                    // Dashed: each dash a filled piece of the band; dots a line across it.
+                    // Dashed: bands are filled; zero-width pieces and dots are stroked.
                     Some(lt) => {
                         let min = b.opts.min_dash / ctx.xf.scale_factor().max(1e-12);
                         let (tris, ticks, centres) = wide::dashed(p, tol, lt, ltscale, min);
@@ -159,10 +159,15 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                         }
                     }
                     None => {
-                        b.tris(ctx, rgb, &fill::wide_polyline(p, tol));
+                        let (tris, strokes, centres) = fill::wide_polyline(p, tol);
+                        b.tris(ctx, rgb, &tris);
+                        for pts in &strokes {
+                            b.polyline(ctx, rgb, lw, pts);
+                        }
                         if hairline {
-                            let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
-                            b.hairline(ctx, rgb, &pl.tessellate(tol));
+                            for pts in &centres {
+                                b.hairline(ctx, rgb, pts);
+                            }
                         }
                     }
                 }
@@ -313,7 +318,7 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
     if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))
         && ctx.depth < cadcraft_doc::MAX_BLOCK_DEPTH
     {
-        let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::IDENTITY) };
+        let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::translate(dm.block_offset.xy())) };
         // DIMTFILL: the block's MTEXT carries no background mask here, so a background
         // around each of the block's texts is drawn before the block's first text or first
         // line of the text's marks, except for a text that a SOLID of the block covers.
@@ -340,9 +345,9 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
             if !b.expand() {
                 break;
             }
-            if fill_pending && starts_text_marks(be, &g) {
+            if fill_pending && starts_text_marks(be, &g, dm.block_offset.xy()) {
                 for corners in &boxes {
-                    dim_text_fill(b, ctx, e, &style, corners);
+                    dim_text_fill(b, &sub, e, &style, corners);
                 }
                 fill_pending = false;
             }

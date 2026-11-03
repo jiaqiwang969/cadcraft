@@ -165,7 +165,7 @@ pub fn anno_scaled(e: &Entity, f: f64) -> Entity {
         }
         EntityKind::Dimension(dm) => {
             dm.overrides.insert("scale".into(), serde_json::json!(f));
-            dm.block = None;
+            dm.clear_block();
         }
         EntityKind::MLeader(m) => {
             let land = m.landing;

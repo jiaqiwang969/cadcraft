@@ -473,20 +473,25 @@ impl Polyline {
     }
     /// The segments, including the closing segment when closed.
     pub fn segments(&self) -> Vec<Segment> {
+        self.indexed_segments().map(|(_, segment)| segment).collect()
+    }
+    /// Nondegenerate segments paired with their original starting-vertex indices.
+    /// Widths and other per-vertex properties must keep these indices when duplicate
+    /// vertices are skipped; enumerating `segments()` would shift those properties.
+    pub fn indexed_segments(&self) -> impl Iterator<Item = (usize, Segment)> + '_ {
         let n = self.vertices.len();
-        let mut out = Vec::with_capacity(n);
         let count = if self.closed { n } else { n.saturating_sub(1) };
-        for i in 0..count {
-            let (Some(v), Some(w)) = (self.vertices.get(i), self.vertices.get((i + 1) % n.max(1))) else { continue };
+        (0..count).filter_map(move |i| {
+            let (v, w) = (self.vertices.get(i)?, self.vertices.get((i + 1) % n.max(1))?);
             if v.p.near(w.p, EPS) && v.bulge.abs() < 1e-12 {
-                continue;
+                return None;
             }
-            match bulge_to_arc(v.p, w.p, v.bulge) {
-                Some((arc, ccw)) => out.push(Segment::Arc { arc, ccw }),
-                None => out.push(Segment::Line(Line::new(v.p, w.p))),
-            }
-        }
-        out
+            let segment = match bulge_to_arc(v.p, w.p, v.bulge) {
+                Some((arc, ccw)) => Segment::Arc { arc, ccw },
+                None => Segment::Line(Line::new(v.p, w.p)),
+            };
+            Some((i, segment))
+        })
     }
     pub fn len(&self) -> f64 {
         self.segments().iter().map(Segment::len).sum()

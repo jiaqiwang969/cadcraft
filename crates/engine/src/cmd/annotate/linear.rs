@@ -71,6 +71,7 @@ fn chained(s: &Session, prev: &Dimension, next: Vec2, baseline: bool) -> EntityK
         defpt: v3(defpt),
         text: String::new(),
         block: None,
+        block_offset: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
         user_text_pos: false,

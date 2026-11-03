@@ -761,20 +761,20 @@ fn dimension_block_definitions(
             if let EntityKind::Dimension(dm) = &e.kind {
                 let reused = dim_plan.reuse.get(&e.handle);
                 let ents: Vec<Entity>;
-                let name = match reused {
+                let (name, offset) = match reused {
                     // A dimension still linked to the block it was read with hasn't changed since
                     // (edits drop the link, and the screen draws that block): the block is written
                     // as read, so other programs show it as they drew it.
                     Some(b) if !b.entities.is_empty() => {
                         ents = b.entities.iter().map(|x| x.as_ref().clone()).collect();
                         reused_handles.extend(ents.iter().map(|x| x.handle).filter(|h| h.0 != 0));
-                        b.name.clone()
+                        (b.name.clone(), dm.block_offset)
                     }
                     Some(b) => {
                         let mut fresh = dim_block_entities(d, dm, &e.common.layer);
                         reuse_handles(&mut fresh, b, &mut reused_handles);
                         ents = fresh;
-                        b.name.clone()
+                        (b.name.clone(), Vec3::ZERO)
                     }
                     None => {
                         ents = dim_block_entities(d, dm, &e.common.layer);
@@ -784,11 +784,11 @@ fn dimension_block_definitions(
                             name = format!("*D{n}");
                         }
                         n += 1;
-                        name
+                        (name, Vec3::ZERO)
                     }
                 };
                 let brh = w.h();
-                cx.dim_blocks.insert(e.handle, name.clone());
+                cx.dim_blocks.insert(e.handle, (name.clone(), offset));
                 dim_defs.push((name, brh, ents));
             }
         }

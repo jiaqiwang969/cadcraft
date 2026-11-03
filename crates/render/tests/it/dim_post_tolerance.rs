@@ -19,6 +19,7 @@ fn text(vars: serde_json::Value) -> (String, String) {
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
+        block_offset: Default::default(),
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),

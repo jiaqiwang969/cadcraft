@@ -5,6 +5,18 @@ fn close(a: f64, b: f64) -> bool {
 }
 
 #[test]
+fn polyline_segment_indices_survive_duplicate_vertices() {
+    let mut pl = Polyline::from_points(&[Vec2::ZERO, Vec2::X, Vec2::X, Vec2::new(1.0, 1.0)], false);
+    assert_eq!(pl.indexed_segments().map(|(i, _)| i).collect::<Vec<_>>(), vec![0, 2]);
+    pl.closed = true;
+    assert_eq!(pl.indexed_segments().map(|(i, _)| i).collect::<Vec<_>>(), vec![0, 2, 3]);
+    pl.vertices.clear();
+    assert_eq!(pl.indexed_segments().count(), 0);
+    pl.vertices.push(PolyVertex::new(Vec2::ZERO));
+    assert_eq!(pl.indexed_segments().count(), 0);
+}
+
+#[test]
 fn angles_normalize() {
     assert!(close(norm_angle(-PI / 2.0), 3.0 * PI / 2.0));
     assert!(close(ccw_sweep(0.0, 0.0), TAU));

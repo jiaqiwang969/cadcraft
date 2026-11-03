@@ -13,7 +13,7 @@ pub(super) fn run_update(s: &mut Session, p: &Value) -> Result<Value> {
         let _ = d.modify_entity(h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind {
                 dm.style = st.clone();
-                dm.block = None;
+                dm.clear_block();
                 n += 1;
             }
         });
@@ -44,7 +44,7 @@ pub(super) fn run_override(s: &mut Session, p: &Value) -> Result<Value> {
         let _ = d.modify_entity(*h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind {
                 dm.text = t.clone();
-                dm.block = None;
+                dm.clear_block();
             }
         });
     }
@@ -130,7 +130,7 @@ pub(super) fn run_dimtedit(s: &mut Session, p: &Value) -> Result<Value> {
         };
         d.modify_entity(*h, |e| {
             let EntityKind::Dimension(dm) = &mut e.kind else { return };
-            dm.block = None;
+            dm.clear_block();
             if let Some(q) = at {
                 dm.text_mid = v3(q);
                 dm.user_text_pos = true;
@@ -201,7 +201,7 @@ pub(super) fn run_dimspace(s: &mut Session, p: &Value) -> Result<Value> {
                 let moved = cur + n * (target - cur).dot(n);
                 o.defpt = v3(moved);
                 o.user_text_pos = false;
-                o.block = None;
+                o.clear_block();
             }
         })?;
     }

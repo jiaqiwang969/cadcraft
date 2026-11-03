@@ -634,6 +634,7 @@ fn invisible_dimblock_entity_is_ignored_in_dimension_extents() {
                 text_rotation: 0.0,
                 user_text_pos: false,
                 block: Some("*D1".into()),
+                block_offset: Default::default(),
                 overrides: Default::default(),
                 assoc: vec![],
                 marks: Default::default(),

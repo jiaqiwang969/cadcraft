@@ -212,7 +212,10 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
                         inner
                     }
                 };
-                b = b.union(&inner);
+                // Cache the definition's bounds, then translate each reference separately.
+                if !inner.is_empty() {
+                    b = b.union(&Bounds2::from_points(inner.corners().map(|p| p + dm.block_offset.xy())));
+                }
             }
             b
         }

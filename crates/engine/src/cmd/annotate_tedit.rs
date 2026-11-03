@@ -103,7 +103,7 @@ impl Interactive for TEditM {
             let st = doc.dim_style(&d.style).cloned().unwrap_or_default().with_overrides(&d.overrides);
             st.follow_text(&mut d, doc.header.f64("DIMSCALE", 1.0));
         }
-        d.block = None;
+        d.clear_block();
         vec![EntityKind::Dimension(d)]
     }
 }

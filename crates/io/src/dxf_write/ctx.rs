@@ -31,7 +31,8 @@ pub(super) struct Ctx {
     /// [`paper_view`] writes that layout's paper-space viewport ahead of it.
     pub(super) paper_views: HashMap<Handle, usize>,
     /// Dimension → anonymous `*D` block name.
-    pub(super) dim_blocks: HashMap<Handle, String>,
+    /// Output block name and translation; zero for regenerated geometry in WCS.
+    pub(super) dim_blocks: HashMap<Handle, (String, Vec3)>,
     /// Upper-case text style name → STYLE record handle.
     pub(super) styles: HashMap<String, String>,
     /// Upper-case arrow name (as stored in styles/overrides) → BLOCK_RECORD handle.

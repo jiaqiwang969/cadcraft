@@ -36,6 +36,15 @@ The desktop app's are listed by `cadcraft --help`; its one flag fallback is
 `CADCRAFT_CONTROL_PORT` for `--control`, where a bad value is a usage error that names the
 variable.
 
+SHX fonts are optional runtime inputs. Set `CADCRAFT_SHX_PATH` before starting the process
+to a list of user font directories (`:` separated on Unix, `;` on Windows). Names are matched
+case-insensitively, with or without `.shx`; vendor installation folders are not scanned.
+Legacy `shapes` and non-extended `bigfont` containers are supported for horizontal text.
+The text style's base font and Big Font are resolved together, using the drawing's
+`DWGCODEPAGE` for Big Font character codes. `CADCRAFT_SHX_CODEPAGE` can override a missing or
+incorrect code page (for example `gbk` or `shift_jis`). Unsupported or missing fonts retain
+the normal fallback. Font files are never embedded into exports or the program by this lookup.
+
 ## Not followed yet
 
 - **`CADCRAFT_CONFIG_DIR` is the one flag fallback where an empty variable doesn't count as

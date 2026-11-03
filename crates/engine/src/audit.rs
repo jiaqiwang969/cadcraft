@@ -483,7 +483,7 @@ fn references(d: &mut Drawing, out: &mut Vec<Issue>) {
                             format!("dimension's block \"{b}\" doesn't exist"),
                             "the dimension draws itself again",
                         ));
-                        dim.block = None;
+                        dim.clear_block();
                     }
                     let before = dim.assoc.len();
                     dim.assoc.retain(|a| all.contains(&a.handle));

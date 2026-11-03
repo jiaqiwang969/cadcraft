@@ -69,7 +69,7 @@ fn edit_dims(s: &mut Session, hs: &[Handle], f: &dyn Fn(&mut Dimension) -> bool)
             if let EntityKind::Dimension(dm) = &mut e.kind
                 && f(dm)
             {
-                dm.block = None;
+                dm.clear_block();
                 changed = true;
             }
         })?;

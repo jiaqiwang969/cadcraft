@@ -193,7 +193,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
                     d.user_text_pos = true;
                 }
             }
-            d.block = None;
+            d.clear_block();
         }
         EntityKind::Leader(l) => set_xy(l.vertices.get_mut(index)?, to),
         EntityKind::MLine(m) => set_xy(&mut m.vertices.get_mut(index)?.p, to),

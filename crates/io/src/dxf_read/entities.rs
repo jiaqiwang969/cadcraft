@@ -183,7 +183,7 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             EntityKind::Dimension(Dimension {
                 kind,
                 defpt: t.p(10),
-                // The text midpoint is the one OCS point of a DIMENSION.
+                // The text midpoint (group 11) is in OCS.
                 text_mid: if c.extrusion.z < 0.0 { ocs(&c, t.p(11)) } else { t.p(11) },
                 p13: t.p(13),
                 p14: t.p(14),
@@ -195,6 +195,7 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
                 text_rotation: t.fd(53, 0.0).to_radians(),
                 user_text_pos: t.i(70).unwrap_or(0) & 128 != 0,
                 block: t.s(2).filter(|s| !s.is_empty()),
+                block_offset: ocs(&c, t.p(12)),
                 overrides: Default::default(),
                 assoc: Vec::new(),
                 marks: Default::default(),

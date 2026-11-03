@@ -286,7 +286,7 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
         nd.text_mid.y += first.y;
     }
     if nd != *dm {
-        nd.block = None;
+        nd.clear_block();
     }
     nd
 }
