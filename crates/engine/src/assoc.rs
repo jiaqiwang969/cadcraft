@@ -38,6 +38,25 @@ fn arc_geom(a: &cadcraft_doc::Arc) -> cadcraft_geom::Arc {
     cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end)
 }
 
+/// Endpoint of a finite open spline. Invalid/closed curves have no endpoint association.
+fn spline_endpoint(s: &cadcraft_geom::Spline, end: bool) -> Option<Vec2> {
+    if s.closed
+        || s.control.len() > 20_000
+        || !s.is_valid()
+        || s.control.iter().any(|p| !p.is_finite())
+        || s.knots.iter().any(|k| !k.is_finite())
+        || (!s.weights.is_empty() && (s.weights.len() != s.control.len() || s.weights.iter().any(|w| !w.is_finite() || *w <= 0.0)))
+    {
+        return None;
+    }
+    let (lo, hi) = s.domain();
+    if lo >= hi {
+        return None;
+    }
+    let p = s.eval(if end { hi } else { lo });
+    p.is_finite().then_some(p)
+}
+
 /// Where a snap sits on an object now.
 pub fn snap_point(d: &Drawing, a: &DimAssoc) -> Option<Vec2> {
     let e = d.entity(a.handle)?;
@@ -59,6 +78,8 @@ pub fn snap_point(d: &Drawing, a: &DimAssoc) -> Option<Vec2> {
         (EntityKind::LwPolyline(p), AssocSnap::Vertex { index }) => p.vertices.get(*index).map(|v| v.p),
         (EntityKind::LwPolyline(p), AssocSnap::Start) => p.vertices.first().map(|v| v.p),
         (EntityKind::LwPolyline(p), AssocSnap::End) => p.vertices.last().map(|v| v.p),
+        (EntityKind::Spline(s), AssocSnap::Start) => spline_endpoint(s, false),
+        (EntityKind::Spline(s), AssocSnap::End) => spline_endpoint(s, true),
         (EntityKind::Point(p), AssocSnap::Start | AssocSnap::Center) => Some(p.p.xy()),
         _ => None,
     }
@@ -82,6 +103,10 @@ fn candidates(kind: &EntityKind) -> Vec<(AssocSnap, Vec2)> {
             ]
         }
         EntityKind::Circle(c) => vec![(AssocSnap::Center, c.center.xy())],
+        EntityKind::Spline(s) => [(AssocSnap::Start, spline_endpoint(s, false)), (AssocSnap::End, spline_endpoint(s, true))]
+            .into_iter()
+            .filter_map(|(snap, p)| p.map(|p| (snap, p)))
+            .collect(),
         EntityKind::LwPolyline(p) => p.vertices.iter().take(10_000).enumerate().map(|(i, v)| (AssocSnap::Vertex { index: i }, v.p)).collect(),
         EntityKind::Point(p) => vec![(AssocSnap::Start, p.p.xy())],
         _ => Vec::new(),
@@ -314,8 +339,15 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
                     Some(EntityKind::Dimension(p)) => Some(p),
                     _ => None,
                 };
-                let nd = recompute(dm, prev, before, d);
+                let mut nd = recompute(dm, prev, before, d);
                 if nd != *dm {
+                    // Live queries, drawing and file export must describe the
+                    // same updated dimension; preserve manual text placement.
+                    let g = cadcraft_render::dimension_in(d, &nd);
+                    nd.measurement = g.measurement;
+                    if !nd.user_text_pos {
+                        nd.text_mid = g.text_pos.to3(nd.text_mid.z);
+                    }
                     changes.push((e.handle, nd));
                 }
             }

@@ -45,7 +45,9 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     }
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "p15", "p16"],
+        // Two-line angular: four source endpoints are groups 13, 14, 15, 10.
+        // Group 16 locates the dimension arc; it is not a geometry reference.
+        DimKind::Angular => &["p13", "p14", "p15", "defpt"],
         DimKind::Angular3P => &["p13", "p14", "p15"],
         // Saved as an aligned dimension (`dim_xdata` marks it): its extension origins are the arc ends.
         DimKind::ArcLength => &["p13", "p14"],
@@ -62,6 +64,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
             "p14" => dm.p14,
             "p15" => dm.p15,
             "p16" => dm.p16,
+            "defpt" => dm.defpt,
             _ => continue,
         };
         if let EntityKind::LwPolyline(p) = &ent.kind {
@@ -93,6 +96,12 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
                 }
                 (6, 0.0, Some(*other))
             }
+        };
+        // Spline knot domains need not be 0..1. Preserve the native endpoint parameter.
+        let param = match (&ent.kind, &a.snap) {
+            (EntityKind::Spline(s), AssocSnap::Start) => s.domain().0,
+            (EntityKind::Spline(s), AssocSnap::End) => s.domain().1,
+            _ => param,
         };
         flags |= 1 << slot;
         refs.push(OsnapRef { osnap, main: a.handle, segment: 0, param, point, other });

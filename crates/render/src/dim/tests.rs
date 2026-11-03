@@ -392,6 +392,51 @@ fn radial_and_angular_text() {
 }
 
 #[test]
+fn two_line_angle_uses_the_selected_quadrant_with_finite_chamfer_edges() {
+    // The chamfer ends at the shoulder, but the requested acute angle is on its
+    // extension. Reversing either source line must not change that quadrant.
+    for offset in [Vec2::ZERO, Vec2::new(1.0, 10.0), Vec2::new(-70.0, 30.0)] {
+        for reverse_a in [false, true] {
+            for reverse_b in [false, true] {
+                for swap in [false, true] {
+                    let mut a = [Vec2::new(-1.0, -1.0), Vec2::ZERO];
+                    let mut b = [Vec2::ZERO, Vec2::new(14.0, 0.0)];
+                    if reverse_a {
+                        a.reverse();
+                    }
+                    if reverse_b {
+                        b.reverse();
+                    }
+                    if swap {
+                        std::mem::swap(&mut a, &mut b);
+                    }
+                    for (location, degrees) in [(22.5_f64, 45.0_f64), (112.5, 135.0), (202.5, 45.0), (292.5, 135.0)] {
+                        let mut d = lin((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0);
+                        d.kind = DimKind::Angular;
+                        d.p13 = (a[0] + offset).to3(0.0);
+                        d.p14 = (a[1] + offset).to3(0.0);
+                        d.defpt = (b[0] + offset).to3(0.0);
+                        d.p15 = (b[1] + offset).to3(0.0);
+                        d.p16 = (offset + Vec2::from_angle(location.to_radians()) * 5.0).to3(0.0);
+                        let g = dimension_geometry(&d, &DimStyle::default(), 1.0);
+                        assert!((g.measurement - degrees.to_radians()).abs() < 1e-10, "{d:?}: {}", g.measurement);
+                        assert_eq!(g.value, format!("{degrees}°"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn three_point_angle_still_supports_an_explicit_reflex_sector() {
+    let mut d = lin((10.0, 0.0), (0.0, 10.0), (-3.0, -3.0), 0.0);
+    d.kind = DimKind::Angular3P;
+    d.p15 = Vec3::ZERO;
+    assert_eq!(dimension_geometry(&d, &DimStyle::default(), 1.0).value, "270°");
+}
+
+#[test]
 fn hostile_styles_do_not_panic() {
     let d = lin((0.0, 0.0), (10.0, 0.0), (0.0, 5.0), 0.0);
     for st in [
@@ -444,5 +489,44 @@ fn mtext_contents_write_the_diameter_sign_as_a_code() {
         assert_eq!(g.mtext_contents(), contents, "{value:?}");
         assert_eq!(decode_value(&g.mtext_contents()), value, "{value:?} reads back");
         assert!(!g.mtext_contents().contains('⌀'));
+    }
+}
+
+#[test]
+fn dimension_block_keeps_stacked_tolerances_and_limits() {
+    let d = lin((0.0, 0.0), (20.0, 0.0), (0.0, 10.0), 0.0);
+    for limits in [false, true] {
+        let g = dimension_geometry(
+            &d,
+            &st_with(|s| {
+                s.tolerance = !limits;
+                s.limits = limits;
+                s.tol_plus = 0.02;
+                s.tol_minus = 0.01;
+                s.tol_decimals = 2;
+                s.decimals = 2;
+            }),
+            1.0,
+        );
+        let saved = g.mtext_contents();
+        assert!(saved.contains("\\S"), "stacking must survive the native display block: {saved}");
+        assert!(saved.contains("\\H"), "relative tolerance height must survive: {saved}");
+        let expected = if limits { "20.02/19.99" } else { "20.00+0.02/-0.01" };
+        assert_eq!(decode_value(&cadcraft_fonts::plain_mtext(&saved)), expected);
+        assert_eq!(saved, g.mtext);
+    }
+}
+
+#[test]
+fn rich_dimension_block_preserves_controls_and_normalizes_diameter() {
+    for (raw, saved) in [
+        (r"%%c20{\H1x;\S+0.02^-0.01;}", r"%%c20{\H1x;\S+0.02^-0.01;}"),
+        (r"⌀20{\H1x;\S+0.02^-0.01;}", r"%%c20{\H1x;\S+0.02^-0.01;}"),
+        ("5%⌀6", "5%%%%%c6"),
+        (r"20%%p0.02", r"20%%p0.02"),
+    ] {
+        let g = DimGeometry { mtext: raw.into(), value: decode_value(&cadcraft_fonts::plain_mtext(raw)), ..DimGeometry::default() };
+        assert_eq!(g.mtext_contents(), saved);
+        assert_eq!(decode_value(&cadcraft_fonts::plain_mtext(saved)), g.value);
     }
 }

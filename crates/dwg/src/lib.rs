@@ -590,6 +590,7 @@ mod native {
         let mut doc = std::panic::catch_unwind(move || acadrust::DxfReader::from_reader(Cursor::new(data)).and_then(|r| r.read()))
             .map_err(|_| "the DXF→DWG conversion failed".to_string())?
             .map_err(|e| format!("DXF: {e}"))?;
+        let input_version = doc.version;
         match version {
             Some(v) => doc.version = v,
             // Without a version asked for, write at least AutoCAD 2004 (AC1018) DWG: R2000 DWG
@@ -606,6 +607,7 @@ mod native {
             dimension_flags(&mut doc);
             drop_unwritable(&mut doc);
             current_dimstyle(&mut doc);
+            super::text_fill::promote(&mut doc, input_version);
             add_variable_dictionary(&mut doc);
             current_text_style(&mut doc);
             current_layer(&mut doc);
@@ -743,6 +745,9 @@ mod native {
 
 #[cfg(not(no_dwg_bridge))]
 pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as};
+
+#[cfg(not(no_dwg_bridge))]
+mod text_fill;
 
 // Test-only: the stage ("post_process" or "convert") whose guard the current test checks. The
 // stage then panics on entry, so a test through the public API shows whether it is guarded.

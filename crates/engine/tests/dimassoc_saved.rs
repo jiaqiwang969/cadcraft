@@ -138,3 +138,81 @@ fn the_issue_repro_saves_every_associated_dimension_with_dimassoc() {
     assert_eq!(refs.len(), 2, "linear: both origins");
     assert!(refs.iter().all(|r| named(r, l3)), "linear: its line");
 }
+
+#[test]
+fn two_line_angle_preserves_all_four_origins_without_private_xdata() {
+    let mut s = Session::new();
+    let l1 = first_line(&s.execute("line", &json!({"points": [[0, 9], [1, 10]]})).unwrap());
+    let l2 = first_line(&s.execute("line", &json!({"points": [[1, 10], [15, 10]]})).unwrap());
+    let angular = handle(&s.execute("dimangular", &json!({"lines": [l1.hex(), l2.hex()], "at": [4, 11]})).unwrap());
+    let expected = match &s.doc().unwrap().entity(angular).unwrap().kind {
+        EntityKind::Dimension(dm) => dm.assoc.clone(),
+        _ => panic!("angular dimension"),
+    };
+    assert_eq!(expected.len(), 4);
+    let text = cadcraft_io::write_dxf(s.doc().unwrap());
+    let rec = dimassoc(&text, angular).unwrap();
+    assert_eq!(int(&rec, 90), Some(15), "all four source endpoints are associated");
+    assert_eq!(point_refs(&rec).len(), 4, "the arc placement is not a source endpoint");
+
+    // A reader which only understands standard DXF must have the same four
+    // links. Private round-trip metadata must not mask an incomplete DIMASSOC.
+    let standard: String = pairs(&text).into_iter().filter(|(code, _)| *code < 1000).map(|(code, value)| format!("{code}\n{value}\n")).collect();
+    let read = cadcraft_io::read_dxf(standard.as_bytes()).unwrap();
+    let restored = match &read.entity(angular).unwrap().kind {
+        EntityKind::Dimension(dm) => &dm.assoc,
+        _ => panic!("angular dimension retained"),
+    };
+    assert_eq!(restored.len(), 4);
+    for link in expected {
+        assert!(restored.contains(&link), "missing or swapped source endpoint: {link:?}; got {restored:?}");
+    }
+}
+
+#[test]
+fn rational_spline_endpoint_dimensions_follow_edits_and_standard_save_reopen() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name":"DIMASSOC","value":2})).unwrap();
+    let a = handle(&s.execute("spline", &json!({"control":[[0.,0.],[0.,4.],[0.,8.]],"degree":2,"weights":[1.,0.8,1.]})).unwrap());
+    let b = handle(&s.execute("spline", &json!({"control":[[30.,0.],[30.,6.],[30.,12.]],"degree":2,"weights":[1.,0.7,1.]})).unwrap());
+    let h = handle(
+        &s.execute("dimlinear", &json!({"origins":[{"handle":a.hex(),"snap":"end"},{"handle":b.hex(),"snap":"start"}],"rotation":0,"at":[15.,20.]}))
+            .unwrap(),
+    );
+    let check = |s: &Session, x: f64| {
+        let Some(EntityKind::Dimension(d)) = s.doc().unwrap().entity(h).map(|e| &e.kind) else { panic!("dimension") };
+        assert_eq!(d.assoc.len(), 2);
+        assert!((d.p13.x - x).abs() < 1e-10 && (d.p13.y - 8.).abs() < 1e-10);
+        assert!((d.p14.x - 30.).abs() < 1e-10 && d.p14.y.abs() < 1e-10);
+    };
+    check(&s, 0.);
+    for (name, next) in [("spline.dxf", 1.), ("spline.dwg", 2.)] {
+        let bytes = cadcraft_io::write(s.doc().unwrap(), name).unwrap();
+        let drawing = if name.ends_with("dxf") {
+            let text = String::from_utf8(bytes).unwrap();
+            let refs = point_refs(&dimassoc(&text, h).unwrap());
+            assert_eq!(refs.len(), 2);
+            assert_eq!(int(&refs[0], 72), Some(1));
+            assert_eq!(int(&refs[1], 72), Some(13));
+            let standard: String = pairs(&text).into_iter().filter(|(c, _)| *c < 1000).map(|(c, v)| format!("{c}\n{v}\n")).collect();
+            cadcraft_io::read_dxf(standard.as_bytes()).unwrap()
+        } else {
+            cadcraft_io::read(&bytes, name).unwrap()
+        };
+        s = Session::new();
+        s.open_drawing(drawing, name, None);
+        check(&s, next - 1.);
+        s.execute("move", &json!({"handles":[a.hex()],"delta":[1.,0.]})).unwrap();
+        check(&s, next);
+    }
+}
+
+#[test]
+fn closed_spline_explicit_endpoint_is_rejected_without_dimension_side_effects() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name":"DIMASSOC","value":2})).unwrap();
+    let a = handle(&s.execute("spline", &json!({"fit":[[0.,0.],[10.,0.],[5.,10.]],"closed":true})).unwrap());
+    let before = s.doc().unwrap().model.len();
+    assert!(s.execute("dimlinear", &json!({"origins":[{"handle":a.hex(),"snap":"start"},{"handle":a.hex(),"snap":"end"}],"at":[0.,20.]})).is_err());
+    assert_eq!(s.doc().unwrap().model.len(), before);
+}

@@ -66,17 +66,20 @@ pub struct DimGeometry {
 }
 
 impl DimGeometry {
-    /// `value` as the contents of a plain MTEXT (the dimension's `*D` block, its EXPLODE
-    /// pieces): the diameter sign as `%%c`, not the decoded ⌀ (U+2300), which no SHX font has,
-    /// so other programs plot nothing for it, while every font draws `%%c` (#1645). A `%`
-    /// that would run into a code is written `%%%`.
+    /// Keep the layout's MTEXT controls in the dimension's `*D` block and EXPLODE
+    /// pieces. Flattening stacked tolerances changes their size after saving while
+    /// the line gaps still use the original layout. Value-only callers retain the
+    /// plain-text fallback. Encode U+2300 as `%%c` for SHX readers (#1645), without
+    /// escaping the existing symbol codes in rich MTEXT.
     pub fn mtext_contents(&self) -> String {
-        let mut out = String::with_capacity(self.value.len() + 2);
-        let mut chars = self.value.chars().peekable();
+        let rich = !self.mtext.is_empty();
+        let source = if rich { &self.mtext } else { &self.value };
+        let mut out = String::with_capacity(source.len() + 2);
+        let mut chars = source.chars().peekable();
         while let Some(c) = chars.next() {
             match c {
                 '⌀' => out.push_str("%%c"),
-                '%' if matches!(chars.peek(), Some('%' | '⌀')) => out.push_str("%%%"),
+                '%' if matches!(chars.peek(), Some('⌀')) || (!rich && matches!(chars.peek(), Some('%'))) => out.push_str("%%%"),
                 c => out.push(c),
             }
         }

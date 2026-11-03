@@ -82,6 +82,9 @@ fn refill(before: &Drawing, after: &Drawing, l: &HatchLoop) -> Refill {
     {
         return Refill::Loop(vs);
     }
+    if let Some(vs) = super::exact::trace(after, &live) {
+        return Refill::Loop(vs);
+    }
     let nb = bounds_of(after, &live);
     if nb.is_empty() {
         return Refill::Open;

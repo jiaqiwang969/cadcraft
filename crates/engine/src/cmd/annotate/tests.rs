@@ -47,6 +47,98 @@ fn linear_dimension_follows_line_endpoint() {
 }
 
 #[test]
+fn picked_chamfer_keeps_both_origins_on_the_selected_line() {
+    let mut s = Session::new();
+    let chamfer = line(&mut s, [0.0, 9.0], [1.0, 10.0]);
+    let neighbor = line(&mut s, [1.0, 10.0], [15.0, 10.0]);
+    let d = h(&s.execute("dimlinear", &json!({"object": chamfer.hex(), "at": [0.5, 15]})).unwrap());
+    assert_eq!(dim(&s, d).assoc.len(), 2);
+    assert!(dim(&s, d).assoc.iter().all(|a| a.handle == chamfer));
+    s.execute("properties.set", &json!({"handles": [chamfer.hex()], "end": [2, 10]})).unwrap();
+    let changed = dim(&s, d);
+    assert_eq!(changed.measurement, 2.0);
+    assert!(near(changed.text_mid.xy(), cadcraft_render::dimension_in(s.doc().unwrap(), &changed).text_pos));
+    s.execute("properties.set", &json!({"handles": [neighbor.hex()], "start": [8, 10]})).unwrap();
+    assert_eq!(dim(&s, d), changed, "coincident neighbor is not a dependency");
+}
+
+#[test]
+fn interactive_picked_line_keeps_its_shared_endpoint() {
+    let mut s = Session::new();
+    let selected = line(&mut s, [0.0, 0.0], [6.0, 0.0]);
+    line(&mut s, [6.0, 0.0], [6.0, 8.0]);
+    s.cmdline("dimlinear").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("3,0").unwrap();
+    s.cmdline("3,-2").unwrap();
+    let d = s.last_dim.unwrap();
+    assert_eq!(dim(&s, d).assoc.len(), 2);
+    assert!(dim(&s, d).assoc.iter().all(|a| a.handle == selected));
+}
+
+#[test]
+fn picked_radial_dimensions_keep_the_selected_overlapping_circle() {
+    let mut s = Session::new();
+    let first = h(&s.execute("circle", &json!({"center": [0, 0], "radius": 3})).unwrap());
+    let selected = h(&s.execute("circle", &json!({"center": [0, 0], "radius": 3})).unwrap());
+    let r = h(&s.execute("dimradius", &json!({"handle": selected.hex(), "at": [8, 6]})).unwrap());
+    let diameter = h(&s.execute("dimdiameter", &json!({"handle": selected.hex(), "at": [-8, 6]})).unwrap());
+    let width = h(&s.execute("dimlinear", &json!({"object": selected.hex(), "at": [0, -8]})).unwrap());
+    for d in [r, diameter, width] {
+        assert_eq!(dim(&s, d).assoc.len(), 2);
+        assert!(dim(&s, d).assoc.iter().all(|a| a.handle == selected));
+    }
+    s.execute("properties.set", &json!({"handles": [selected.hex()], "radius": 4})).unwrap();
+    assert!((dim(&s, r).measurement - 4.0).abs() < 1e-10);
+    assert!((dim(&s, diameter).measurement - 8.0).abs() < 1e-10);
+    assert!((dim(&s, width).measurement - 8.0).abs() < 1e-10);
+    assert_eq!(dim(&s, r).text_mid.xy(), Vec2::new(8.0, 6.0), "manual text placement is retained");
+    s.execute("properties.set", &json!({"handles": [first.hex()], "radius": 7})).unwrap();
+    assert!((dim(&s, r).measurement - 4.0).abs() < 1e-10);
+}
+
+#[test]
+fn picked_polyline_dimensions_its_first_segment_without_neighbor_bindings() {
+    let mut s = Session::new();
+    let selected = h(&s.execute("pline", &json!({"points": [[0, 0], [3, 0], [5, 2]]})).unwrap());
+    line(&mut s, [3.0, 0.0], [8.0, 0.0]);
+    let d = h(&s.execute("dimlinear", &json!({"object": selected.hex(), "at": [1, -5]})).unwrap());
+    assert_eq!(dim(&s, d).assoc.len(), 2);
+    assert!(dim(&s, d).assoc.iter().all(|a| a.handle == selected));
+    s.execute("move", &json!({"handles": [selected.hex()], "delta": [2, 3]})).unwrap();
+    let dm = dim(&s, d);
+    assert_eq!(dm.measurement, 3.0);
+    assert!(near(dm.p13.xy(), Vec2::new(2.0, 3.0)) && near(dm.p14.xy(), Vec2::new(5.0, 3.0)));
+}
+
+#[test]
+fn selected_objects_still_respect_disabled_associativity() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "DIMASSOC", "value": 0})).unwrap();
+    let l = line(&mut s, [0.0, 0.0], [3.0, 0.0]);
+    let c = h(&s.execute("circle", &json!({"center": [0, 0], "radius": 2})).unwrap());
+    let d = h(&s.execute("dimlinear", &json!({"object": l.hex(), "at": [1, -5]})).unwrap());
+    let r = h(&s.execute("dimradius", &json!({"handle": c.hex(), "at": [8, 6]})).unwrap());
+    assert!(dim(&s, d).assoc.is_empty() && dim(&s, r).assoc.is_empty());
+}
+
+#[test]
+fn chamfer_angle_and_live_measurement_follow_endpoint_edits() {
+    let mut s = Session::new();
+    let chamfer = line(&mut s, [0.0, 9.0], [1.0, 10.0]);
+    let shoulder = line(&mut s, [1.0, 10.0], [15.0, 10.0]);
+    let d = h(&s.execute("dimangular", &json!({"lines": [chamfer.hex(), shoulder.hex()], "at": [4, 11]})).unwrap());
+    assert!((dim(&s, d).measurement.to_degrees() - 45.0).abs() < 1e-10);
+    s.execute("properties.set", &json!({"handles": [chamfer.hex()], "end": [2, 10]})).unwrap();
+    let changed = dim(&s, d);
+    assert!((changed.measurement - 0.5_f64.atan()).abs() < 1e-10);
+    assert_eq!(changed.assoc.len(), 4);
+    assert!(near(changed.text_mid.xy(), cadcraft_render::dimension_in(s.doc().unwrap(), &changed).text_pos));
+    s.undo().unwrap();
+    assert!((dim(&s, d).measurement.to_degrees() - 45.0).abs() < 1e-10);
+}
+
+#[test]
 fn moving_the_object_carries_the_dimension() {
     let mut s = Session::new();
     let l = line(&mut s, [0.0, 0.0], [10.0, 0.0]);

@@ -29,7 +29,8 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
     }
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "p15", "p16"],
+        // The fourth source endpoint is DXF 10; DXF 16 is arc placement only.
+        DimKind::Angular => &["p13", "p14", "p15", "defpt"],
         DimKind::Angular3P => &["p13", "p14", "p15"],
         DimKind::ArcLength => &["p13", "p14"],
         DimKind::Ordinate { .. } => &["p13"],
@@ -127,7 +128,7 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
                     AssocSnap::End
                 }
             }
-            EntityKind::Arc(_) => {
+            EntityKind::Arc(_) | EntityKind::Spline(_) => {
                 if osnap == 13 {
                     AssocSnap::Start
                 } else {

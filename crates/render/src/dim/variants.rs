@@ -151,6 +151,26 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
     *text_mid_out = text_mid;
 }
 
+/// Two infinite lines bound four sectors. The arc location selects one of them,
+/// independently of the directions in which the finite source edges were drawn.
+fn line_sector(vertex: Vec2, r: f64, a: Vec2, b: Vec2, at: Vec2) -> Option<(Arc, bool)> {
+    use std::f64::consts::{PI, TAU};
+    if !vertex.is_finite() || !a.is_finite() || !b.is_finite() || !at.is_finite() || !r.is_finite() || a == Vec2::ZERO || b == Vec2::ZERO {
+        return None;
+    }
+    let mut rays = [(a.angle(), true), (a.angle() + PI, true), (b.angle(), false), (b.angle() + PI, false)];
+    for (angle, _) in &mut rays {
+        *angle = angle.rem_euclid(TAU);
+    }
+    rays.sort_by(|x, y| x.0.total_cmp(&y.0));
+    for (&(start, first), &(end, second)) in rays.iter().zip(rays.iter().cycle().skip(1)).take(4) {
+        if first != second && ccw_sweep(start, end) > 1e-12 && cadcraft_geom::angle_in_sweep(vertex.angle_to(at), start, end) {
+            return Some((Arc::new(vertex, r, start, end), first));
+        }
+    }
+    None
+}
+
 pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
     let d = config.dimension;
     let st = config.style;
@@ -167,13 +187,19 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     let (vertex, a1, a2, arc_pt) = if matches!(d.kind, DimKind::Angular3P) {
         (d.p15.xy(), d.p13.xy(), d.p14.xy(), d.defpt.xy())
     } else {
-        let v = cadcraft_geom::line_line_infinite(d.p13.xy(), d.p14.xy(), d.defpt.xy(), d.p15.xy()).map(|x| x.0).unwrap_or(d.p14.xy());
+        let Some((v, _, _)) = cadcraft_geom::line_line_infinite(d.p13.xy(), d.p14.xy(), d.defpt.xy(), d.p15.xy()) else { return };
         (v, d.p14.xy(), d.p15.xy(), d.p16.xy())
     };
     let r = vertex.dist(arc_pt).max(1e-9);
     let s = vertex.angle_to(a1);
     let e = vertex.angle_to(a2);
-    let arc = if cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e) { Arc::new(vertex, r, s, e) } else { Arc::new(vertex, r, e, s) };
+    let (arc, first_at_start) = if matches!(d.kind, DimKind::Angular3P) {
+        let first = cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e);
+        (if first { Arc::new(vertex, r, s, e) } else { Arc::new(vertex, r, e, s) }, first)
+    } else {
+        let Some(sector) = line_sector(vertex, r, d.p14.xy() - d.p13.xy(), d.p15.xy() - d.defpt.xy(), arc_pt) else { return };
+        sector
+    };
     let sweep = ccw_sweep(arc.start, arc.end);
     g.measurement = sweep;
     // DIMAZIN 1 / 2 suppress leading / trailing zeros (DIMZIN's bits 4 / 8).
@@ -190,12 +216,20 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     // the arc location is outside the leg 1 → leg 2 sweep the arc runs from leg 2 to
     // leg 1, and each leg keeps its own extension line, DIMSE1/2 and DIMBLK1/2.
     let (start, finish) = ((sp, -(sp - vertex).perp().normalized()), (ep, (ep - vertex).perp().normalized()));
-    let ((p1, dir1), (p2, dir2)) = if cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e) { (start, finish) } else { (finish, start) };
+    let ((p1, dir1), (p2, dir2)) = if first_at_start { (start, finish) } else { (finish, start) };
+    let (origin1, origin2) = if matches!(d.kind, DimKind::Angular3P) {
+        (vertex + (p1 - vertex).normalized() * vertex.dist(a1).min(r), vertex + (p2 - vertex).normalized() * vertex.dist(a2).min(r))
+    } else {
+        // Start extensions on the actual finite edges, including a chamfer on
+        // the opposite side of the vertex. Do not reflect an endpoint across it.
+        let closest = |a: Vec2, b: Vec2, p: Vec2| cadcraft_geom::Line::new(a, b).closest(p);
+        (closest(d.p13.xy(), d.p14.xy(), p1), closest(d.defpt.xy(), d.p15.xy(), p2))
+    };
     if !st.suppress_ext1 {
-        g.ext_n(ext_line(vertex + (p1 - vertex).normalized() * vertex.dist(a1).min(r), p1, st, k), false);
+        g.ext_n(ext_line(origin1, p1, st, k), false);
     }
     if !st.suppress_ext2 {
-        g.ext_n(ext_line(vertex + (p2 - vertex).normalized() * vertex.dist(a2).min(r), p2, st, k), true);
+        g.ext_n(ext_line(origin2, p2, st, k), true);
     }
     end(g, blk1, p1, dir1);
     end(g, blk2, p2, dir2);

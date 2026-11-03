@@ -95,7 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("spline", "Spline", run_spline)
             .menu(&["Draw", "Spline", "Fit Points"])
             .alias(&["spl"])
-            .params("{fit: [[x,y],...], closed?, knots?: chord|sqrt|uniform, startTangent?, endTangent? ([dx,dy]), tolerance?} | {control: [...], degree?} | {object: handle|true, handles?} (polyline to spline)")
+            .params("{fit: [[x,y],...], closed?, knots?: chord|sqrt|uniform, startTangent?, endTangent? ([dx,dy]), tolerance?} | {control: [...], degree?, weights?: [1e-12..1e12 per control point; weighted coordinates within 1e12]} | {object: handle|true, handles?} (polyline to spline)")
             .interactive(|_| Ok(Box::new(SplineM::default()))),
         CommandSpec::new("donut", "Donut", run_donut)
             .menu(&["Draw", "Donut"])

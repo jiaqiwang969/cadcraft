@@ -16,6 +16,7 @@ use crate::{Accept, EngineError, Input, Interactive, Picker, Prompt, Result, Ses
 
 mod assoc;
 mod edit;
+mod exact;
 mod pick;
 use super::has_doc;
 pub(crate) use assoc::update as refill_associative;
@@ -23,7 +24,7 @@ pub use pick::{HatchPicks, PickMode};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new("hatch", "Hatch...", run_hatch).menu(&["Draw", "Hatch..."]).alias(&["h", "bh", "-hatch"]).params("{points?: [[x,y]] (internal points) and/or handles?: [hex] (closed objects), pattern?: \"ANSI31\" (built in, or defined by patternFile | patternText), patternFile?: path to a .pat file | patternText?: its contents (loads the patterns it defines), scale?, angle? (degrees), associative? (HPASSOC), separate? (HPSEPARATE: a hatch per point/object), origin?: [x,y] (HPORIGIN) | originMode?: \"current\"|\"bottomLeft\"|\"bottomRight\"|\"topLeft\"|\"topRight\"|\"center\" (HPORIGINMODE), style?: \"normal\"|\"outer\"|\"ignore\" (HPISLANDDETECTION)} — gaps up to HPGAPTOL close").interactive(|s| Ok(Box::new(HatchM::new(s, false)))),
+        CommandSpec::new("hatch", "Hatch...", run_hatch).menu(&["Draw", "Hatch..."]).alias(&["h", "bh", "-hatch"]).params("{points?: [[x,y]] (internal points) and/or handles?: [hex] (closed objects, or one simple whole XY LINE/ARC loop of 2-512 edges), pattern?: \"ANSI31\" (built in, or defined by patternFile | patternText), patternFile?: path to a .pat file | patternText?: its contents (loads the patterns it defines), scale?, angle? (degrees), associative? (HPASSOC), separate? (HPSEPARATE: a hatch per point/object), origin?: [x,y] (HPORIGIN) | originMode?: \"current\"|\"bottomLeft\"|\"bottomRight\"|\"topLeft\"|\"topRight\"|\"center\" (HPORIGINMODE), style?: \"normal\"|\"outer\"|\"ignore\" (HPISLANDDETECTION)} — gaps up to HPGAPTOL close").interactive(|s| Ok(Box::new(HatchM::new(s, false)))),
         CommandSpec::new("gradient", "Gradient...", run_gradient).menu(&["Draw", "Gradient..."]).alias(&["gd"]).params("{points? and/or handles?, name?: \"LINEAR\"|\"CYLINDER\"|\"CURVED\"|\"SPHERICAL\"|\"HEMISPHERICAL\" or INV… (colours swapped), color1?, color2?, angle? (degrees), centered? (default true)}").interactive(|s| Ok(Box::new(HatchM::new(s, true)))),
         CommandSpec::new("boundary", "Boundary...", run_boundary).menu(&["Draw", "Boundary..."]).alias(&["bo", "bpoly"]).params("{points: [[x,y]]}").interactive(|_| Ok(Box::new(BoundaryM { region: false }))),
         CommandSpec::new("region", "Region", run_region).menu(&["Draw", "Region"]).alias(&["reg"]).params("{handles?}"),
@@ -256,6 +257,14 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
 
 pub(crate) fn loops_from_handles(s: &Session, hs: &[Handle]) -> Result<Vec<HatchLoop>> {
     let d = s.doc()?;
+    // A selected set of whole LINE/ARC boundaries is one exact connected
+    // loop. Keep both circular bulges and the original source handles.
+    if !hs.is_empty() && hs.iter().all(|h| d.entity(*h).is_some_and(|e| matches!(e.kind, EntityKind::Line(_) | EntityKind::Arc(_)))) {
+        let vertices = exact::trace(d, hs).ok_or_else(|| {
+            EngineError::Other("Selected LINE/ARC boundaries must form one simple closed whole-edge loop (2–512 edges, XY plane).".into())
+        })?;
+        return Ok(vec![HatchLoop { vertices, outer: true, sources: hs.to_vec() }]);
+    }
     let mut loops = Vec::new();
     for h in hs {
         if let Some(vs) = d.entity(*h).and_then(|e| closed_loop(d, e)) {

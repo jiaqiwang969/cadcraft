@@ -4,6 +4,53 @@ use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 
 use crate::*;
 
+/// Cached dimension graphics must already contain the mask on first open, without
+/// requiring another CAD program to edit or regenerate the dimension first.
+#[test]
+fn dimension_background_exists_in_initial_native_display_and_resave() {
+    use acadrust::entities::EntityType;
+    for version in [Version::R2000, Version::R2004, Version::R2007, Version::R2018] {
+        for fill in [0, 1] {
+            let mut drawing = sample();
+            let style = drawing.dim_styles.iter_mut().find(|s| s.name == "Standard").unwrap();
+            style.text_fill = fill;
+            let opts = SaveOptions { version: Some(version), binary: false };
+            for name in ["sample.dxf", "sample.dwg"] {
+                let mut bytes = write_with(&drawing, name, &opts).unwrap();
+                for pass in 0..2 {
+                    let cursor = std::io::Cursor::new(bytes.clone());
+                    let native = if name.ends_with("dwg") {
+                        acadrust::DwgReader::from_stream(cursor).read().unwrap()
+                    } else {
+                        acadrust::DxfReader::from_reader(cursor).unwrap().read().unwrap()
+                    };
+                    let texts: Vec<_> = native
+                        .block_records
+                        .iter()
+                        .filter(|b| b.name.starts_with("*D"))
+                        .flat_map(|b| native.entities_in_block(&b.name))
+                        .filter_map(|e| if let EntityType::MText(t) = e { Some(t) } else { None })
+                        .collect();
+                    assert_eq!(texts.len(), 1);
+                    let expected = if fill == 1 && version >= Version::R2007 { 3 } else { 0 };
+                    assert_eq!(texts[0].background_fill_flags, expected, "{version:?} {name} pass {pass}");
+                    if expected != 0 {
+                        assert!(texts[0].background_scale >= 1.0 && texts[0].background_scale <= 5.0);
+                    }
+                    assert!(
+                        native
+                            .model_space_entities()
+                            .filter_map(|e| if let EntityType::MText(t) = e { Some(t) } else { None })
+                            .all(|t| t.background_fill_flags == 0),
+                        "ordinary text is not a dimension"
+                    );
+                    bytes = write_with(&read(&bytes, name).unwrap(), name, &opts).unwrap();
+                }
+            }
+        }
+    }
+}
+
 #[path = "../tests/support/pdf_read.rs"]
 mod pdf_read;
 

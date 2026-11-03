@@ -1,16 +1,26 @@
-use super::common::{DimText, add_dim, circle_of, dim, pick_at, text_at};
-use super::{Accept, DimKind, EntityKind, Input, Interactive, Prompt, Result, Session, Step, Value, Vec2, bad, json, point_param, targets};
+use super::common::{DimText, add_dim, assoc_enabled, circle_of, dim, pick_at, text_at, with_assoc};
+use super::{Accept, DimKind, EntityKind, Handle, Input, Interactive, Prompt, Result, Session, Step, Value, Vec2, bad, json, point_param, targets};
+
+fn with_target(s: &Session, k: EntityKind, handle: Option<Handle>, diameter: bool) -> EntityKind {
+    if let (Some(h), EntityKind::Dimension(dm), Ok(d)) = (handle, &k, s.doc())
+        && assoc_enabled(s)
+    {
+        let assoc = crate::assoc::radial_assoc(d, h, diameter, dm.defpt.xy(), dm.p15.xy());
+        return with_assoc(k, assoc);
+    }
+    k
+}
 
 fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
     let id = if diameter { "dimdiameter" } else { "dimradius" };
-    let (c, pt, at) = if let (Some(c), Some(pt)) = (point_param(p, "center"), point_param(p, "point")) {
-        (c, pt, None)
+    let (c, pt, at, handle) = if let (Some(c), Some(pt)) = (point_param(p, "center"), point_param(p, "point")) {
+        (c, pt, None, None)
     } else {
         let h = targets(s, p)?.first().copied().ok_or_else(|| bad(id, "`handle` of a circle/arc, or {center, point}"))?;
         let (c, r) = circle_of(s, h).ok_or_else(|| bad(id, "object is not a circle or arc"))?;
         let at = point_param(p, "at");
         let dir = at.unwrap_or(c + Vec2::from_angle(std::f64::consts::FRAC_PI_4));
-        (c, c + (dir - c).normalized() * r, at)
+        (c, c + (dir - c).normalized() * r, at, Some(h))
     };
     if c.near(pt, 1e-12) {
         return Err(bad(id, "`point` must differ from `center`"));
@@ -24,6 +34,7 @@ fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
         Some(at) => text_at(k, at),
         None => k,
     };
+    let k = with_target(s, k, handle, diameter);
     Ok(json!({ "handle": add_dim(s, k)?.hex() }))
 }
 
@@ -38,12 +49,13 @@ pub(super) fn run_diameter(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) struct RadialM {
     diameter: bool,
     target: Option<(Vec2, f64)>,
+    handle: Option<Handle>,
     text: DimText,
 }
 
 impl RadialM {
     pub(super) fn new(diameter: bool) -> Self {
-        RadialM { diameter, target: None, text: DimText::default() }
+        RadialM { diameter, target: None, handle: None, text: DimText::default() }
     }
     fn kind(&self, s: &Session, c: Vec2, r: f64, at: Vec2) -> EntityKind {
         let pt = c + (at - c).normalized() * r;
@@ -52,7 +64,7 @@ impl RadialM {
         } else {
             dim(s, DimKind::Radius, c, Vec2::ZERO, Vec2::ZERO, pt, "")
         });
-        text_at(k, at)
+        with_target(s, text_at(k, at), self.handle, self.diameter)
     }
 }
 
@@ -75,8 +87,11 @@ impl Interactive for RadialM {
         }
         match (self.target, i) {
             (None, Input::Point(p)) => {
-                match pick_at(s, p).and_then(|h| circle_of(s, h)) {
-                    Some(t) => self.target = Some(t),
+                match pick_at(s, p).and_then(|h| circle_of(s, h).map(|t| (h, t))) {
+                    Some((h, t)) => {
+                        self.handle = Some(h);
+                        self.target = Some(t);
+                    }
                     None => s.echo("Object selected is not a circle or arc."),
                 }
                 Ok(Step::Continue)

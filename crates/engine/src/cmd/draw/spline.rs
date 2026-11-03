@@ -4,6 +4,9 @@ use super::{
 };
 
 pub(super) fn run_spline(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("weights").is_some() && (p.get("control").is_none() || p.get("fit").is_some() || p.get("object").is_some()) {
+        return Err(bad("spline", "weights require control points without fit or object"));
+    }
     if p.get("object").is_some() {
         return crate::cmd::spline_opts::run_object(s, p);
     }
@@ -18,7 +21,28 @@ pub(super) fn run_spline(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Degree 1..=10 as at the Degree prompt, `spline.cv` and DXF input (tessellation grows
         // with its square).
-        Spline::from_control(c, p.get("degree").and_then(Value::as_u64).unwrap_or(3).clamp(1, 10) as usize)
+        let mut spline = Spline::from_control(c, p.get("degree").and_then(Value::as_u64).unwrap_or(3).clamp(1, 10) as usize);
+        if let Some(raw) = p.get("weights") {
+            let values = raw.as_array().ok_or_else(|| bad("spline", "weights must be an array"))?;
+            if values.len() != spline.control.len() {
+                return Err(bad("spline", "one weight is required per control point"));
+            }
+            // Positive bounded weights keep the rational denominator away from zero.
+            // Bound weighted controls too: finite factors alone can still overflow.
+            if spline.control.iter().any(|c| !c.is_finite() || c.x.abs() > 1e12 || c.y.abs() > 1e12) {
+                return Err(bad("spline", "weighted control coordinates must be finite and within 1e12"));
+            }
+            let mut weights = Vec::with_capacity(values.len());
+            for value in values {
+                let weight = value
+                    .as_f64()
+                    .filter(|w| w.is_finite() && (1e-12..=1e12).contains(w))
+                    .ok_or_else(|| bad("spline", "weights must be finite numbers from 1e-12 through 1e12"))?;
+                weights.push(weight);
+            }
+            spline.weights = weights;
+        }
+        spline
     } else {
         return Err(bad("spline", "`fit` or `control` points are required"));
     };

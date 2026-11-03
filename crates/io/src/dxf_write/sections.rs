@@ -1020,6 +1020,26 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     w.s(0, "ENDSEC");
 
     // ---------------- BLOCKS ----------------
+    // A dimension's first display uses its anonymous block, before another CAD has
+    // regenerated it. DIMTFILL=1 therefore needs an MTEXT background in that block
+    // as well as the style field. Keep ordinary text/blocks and old formats alone.
+    let dim_backgrounds: HashMap<String, f64> = all_spaces
+        .iter()
+        .flat_map(|s| s.iter())
+        .filter_map(|e| {
+            let EntityKind::Dimension(dm) = &e.kind else { return None };
+            let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
+            if cx.target < Version::R2007 || style.text_fill != 1 {
+                return None;
+            }
+            let (height, gap) = (style.text_height.abs(), style.text_gap.abs());
+            if !height.is_finite() || !gap.is_finite() || height <= f64::EPSILON {
+                return None;
+            }
+            let margin = (1.0 + gap / height).clamp(1.0, 5.0);
+            cx.dim_blocks.get(&e.handle).map(|name| (name.clone(), margin))
+        })
+        .collect();
     w.s(0, "SECTION");
     w.s(2, "BLOCKS");
     let block = |w: &mut W, (name, desc): (&str, &str), brh: &str, base: Vec3, flags: i64, ents: &mut dyn Iterator<Item = &Entity>, paper: bool| {
@@ -1042,7 +1062,16 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
             w.s(4, desc);
         }
         for e in ents {
+            let begin = w.t.len();
             entity(w, d, e, brh, false, &cx);
+            if let Some(margin) = dim_backgrounds.get(name)
+                && matches!(e.kind, EntityKind::MText(_))
+            {
+                // MTEXT 90 combines fill-on and drawing-background bits. Put native
+                // groups before any foreign xdata (Autodesk DXF/MTEXT reference).
+                let end = w.t.get(begin..).and_then(|tags| tags.iter().position(|t| t.code >= 1000)).map_or(w.t.len(), |offset| begin + offset);
+                w.t.splice(end..end, [Tag::i(90, 3), Tag::f(45, *margin), Tag::i(63, 0)]);
+            }
         }
         let eh = w.h();
         w.s(0, "ENDBLK");

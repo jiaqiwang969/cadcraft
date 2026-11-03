@@ -1,18 +1,73 @@
-use super::common::{DimText, add_dim, assoc_enabled, circle_of, dim, linear_kind, pick_at};
+use super::common::{DimText, add_dim, assoc_enabled, circle_of, dim, hex_param, linear_kind, pick_at, with_assoc};
 use super::{
-    Accept, DimKind, Dimension, EngineError, EntityKind, Handle, Input, Interactive, Prim, Prompt, Result, Segment, Session, Step, Value, Vec2, bad,
-    json, point_req, points_param, str_param, v3,
+    Accept, AssocSnap, DimAssoc, DimKind, Dimension, EngineError, EntityKind, Handle, Input, Interactive, Prim, Prompt, Result, Segment, Session,
+    Step, Value, Vec2, bad, json, point_req, points_param, str_param, v3,
 };
 
 pub(super) fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
-    let (a, b) = match p.get("object").and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))) {
-        Some(h) => object_extent(s, h).ok_or_else(|| bad("dimlinear", "`object` must be a line, arc, circle or polyline segment"))?,
-        None => (point_req("dimlinear", p, "p1")?, point_req("dimlinear", p, "p2")?),
+    let object = hex_param(p, "object");
+    let (a, b, explicit) = if let Some(origins) = p.get("origins") {
+        if ["object", "p1", "p2"].iter().any(|key| p.get(*key).is_some()) {
+            return Err(bad("dimlinear", "`origins` cannot be combined with `object`, `p1` or `p2`"));
+        }
+        if s.doc()?.header.i64("DIMASSOC", 2) != 2 {
+            return Err(bad("dimlinear", "explicit `origins` require DIMASSOC=2"));
+        }
+        let origins = origins.as_array().ok_or_else(|| bad("dimlinear", "`origins` must contain exactly two object references"))?;
+        let [first, second] = origins.as_slice() else {
+            return Err(bad("dimlinear", "`origins` must contain exactly two object references"));
+        };
+        let (a, first) = explicit_origin(s, first, "p13")?;
+        let (b, second) = explicit_origin(s, second, "p14")?;
+        (a, b, Some(vec![first, second]))
+    } else {
+        let (a, b) = match object {
+            Some(h) => object_extent(s, h).ok_or_else(|| bad("dimlinear", "`object` must be a line, arc, circle or polyline segment"))?,
+            None => (point_req("dimlinear", p, "p1")?, point_req("dimlinear", p, "p2")?),
+        };
+        (a, b, None)
     };
     let at = point_req("dimlinear", p, "at")?;
     let rot = p.get("rotation").and_then(Value::as_f64).map(f64::to_radians);
     let k = dim(s, linear_kind(a, b, at, rot, false), at, a, b, Vec2::ZERO, str_param(p, "text").unwrap_or(""));
+    let k = if let Some(assoc) = explicit { with_assoc(k, assoc) } else { with_object_assoc(s, k, object) };
     Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+}
+
+/// Resolve the caller's chosen object and snap, never an object found nearby.
+/// Invalid references fail before adding the dimension or changing the drawing.
+fn explicit_origin(s: &Session, value: &Value, point: &str) -> Result<(Vec2, DimAssoc)> {
+    let handle = hex_param(value, "handle").ok_or_else(|| bad("dimlinear", "each origin requires a valid `handle`"))?;
+    let snap = match value.get("snap").and_then(Value::as_str) {
+        Some("start") => AssocSnap::Start,
+        Some("end") => AssocSnap::End,
+        Some("mid") => AssocSnap::Mid,
+        Some("center") => AssocSnap::Center,
+        _ => return Err(bad("dimlinear", "origin `snap` must be start, end, mid or center")),
+    };
+    let doc = s.doc()?;
+    if doc.space(&s.space()).and_then(|store| store.get(handle)).is_none() {
+        return Err(bad("dimlinear", "origin target is not in the current drawing space"));
+    }
+    let assoc = DimAssoc { point: point.into(), handle, snap };
+    let at = crate::assoc::snap_point(doc, &assoc)
+        .filter(|p| p.is_finite())
+        .ok_or_else(|| bad("dimlinear", "origin snap cannot be resolved on the selected object"))?;
+    Ok((at, assoc))
+}
+
+/// Picking an object is stronger evidence than finding another object at the
+/// same coordinates. Preserve that selection in both command and UI paths.
+fn with_object_assoc(s: &Session, k: EntityKind, object: Option<Handle>) -> EntityKind {
+    let Some(h) = object.filter(|_| assoc_enabled(s)) else { return k };
+    let Some(e) = s.doc().ok().and_then(|d| d.entity(h)) else { return k };
+    let snaps = match e.kind {
+        EntityKind::Line(_) | EntityKind::Arc(_) => [AssocSnap::Start, AssocSnap::End],
+        EntityKind::Circle(_) => [AssocSnap::OnCircle { angle: std::f64::consts::PI }, AssocSnap::OnCircle { angle: 0.0 }],
+        EntityKind::LwPolyline(_) => [AssocSnap::Vertex { index: 0 }, AssocSnap::Vertex { index: 1 }],
+        _ => return k,
+    };
+    with_assoc(k, ["p13", "p14"].into_iter().zip(snaps).map(|(point, snap)| DimAssoc { point: point.into(), handle: h, snap }).collect())
 }
 
 pub(super) fn run_aligned(s: &mut Session, p: &Value) -> Result<Value> {
@@ -128,6 +183,7 @@ fn object_extent(s: &Session, h: Handle) -> Option<(Vec2, Vec2)> {
 pub(super) struct LinearM {
     aligned: bool,
     pts: Vec<Vec2>,
+    object: Option<Handle>,
     rotation: Option<f64>,
     text: DimText,
     selecting: bool,
@@ -137,7 +193,7 @@ pub(super) struct LinearM {
 
 impl LinearM {
     pub(super) fn new(aligned: bool) -> Self {
-        LinearM { aligned, pts: Vec::new(), rotation: None, text: DimText::default(), selecting: false, rotating: false }
+        LinearM { aligned, pts: Vec::new(), object: None, rotation: None, text: DimText::default(), selecting: false, rotating: false }
     }
 }
 
@@ -186,20 +242,14 @@ impl Interactive for LinearM {
                     s.echo("*Invalid selection*");
                     return Ok(Step::Continue);
                 };
-                let seg =
-                    s.doc()?.entity(h).and_then(|e| e.kind.prims().into_iter().find_map(|pr| if let Prim::Seg(sg) = pr { Some(sg) } else { None }));
-                match seg {
-                    Some(sg @ Segment::Line(_)) | Some(sg @ Segment::Arc { .. }) => {
-                        self.pts = vec![sg.start(), sg.end()];
+                match object_extent(s, h) {
+                    Some((a, b)) => {
+                        self.pts = vec![a, b];
+                        self.object = Some(h);
                         self.selecting = false;
                     }
                     None => {
-                        if let Some((c, r)) = circle_of(s, h) {
-                            self.pts = vec![c - Vec2::X * r, c + Vec2::X * r];
-                            self.selecting = false;
-                        } else {
-                            s.echo("Object cannot be dimensioned this way.");
-                        }
+                        s.echo("Object cannot be dimensioned this way.");
                     }
                 }
             }
@@ -217,6 +267,7 @@ impl Interactive for LinearM {
             (_, Input::Point(at)) => {
                 let (Some(&a), Some(&b)) = (self.pts.first(), self.pts.get(1)) else { return Ok(Step::Continue) };
                 let k = self.text.apply(dim(s, linear_kind(a, b, at, self.rotation, self.aligned), at, a, b, Vec2::ZERO, ""));
+                let k = with_object_assoc(s, k, self.object);
                 add_dim(s, k)?;
                 if let Some(EntityKind::Dimension(d)) = s.last_dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
                     let st = s.doc()?.dim_style(&d.style).cloned().unwrap_or_default();

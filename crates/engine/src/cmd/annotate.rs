@@ -33,7 +33,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("dimlinear", "Linear", run_linear)
             .menu(&["Dimension", "Linear"])
             .alias(&["dli", "dimlin"])
-            .params("{p1, p2, at, rotation? (degrees; default: horizontal/vertical from `at`), text?} | {object: hex, at} (associative)")
+            .params("{p1, p2, at, rotation? (degrees; default: horizontal/vertical from `at`), text?} | {object: hex, at} | {origins: [{handle: hex, snap: start|end|mid|center}, {handle: hex, snap: start|end|mid|center}], at, rotation?, text?} (explicit origins require DIMASSOC=2)")
             .interactive(|_| Ok(Box::new(LinearM::new(false)))),
         CommandSpec::new("dimaligned", "Aligned", run_aligned)
             .menu(&["Dimension", "Aligned"])
