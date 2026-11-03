@@ -23,13 +23,39 @@ fn key(name: &str) -> String {
 
 /// Register user-supplied font bytes (also usable in web builds). Invalid data is rejected.
 pub fn register(name: &str, bytes: Arc<[u8]>) -> bool {
-    let Some(face) = Face::parse(bytes) else { return false };
-    let mut c = cache().lock().unwrap_or_else(PoisonError::into_inner);
-    if c.faces.len() >= 256 || c.bytes + face.bytes.len() > 64 << 20 {
+    register_many(&[(name.to_owned(), bytes)])
+}
+
+/// Validate and install a whole explicit font pack together. Replacing an existing face does
+/// not consume another cache entry or count its old bytes a second time.
+pub fn register_many(fonts: &[(String, Arc<[u8]>)]) -> bool {
+    if fonts.len() > 256 {
         return false;
     }
-    c.bytes += face.bytes.len();
-    c.faces.insert(key(name), Some(face));
+    let Some(input_bytes) = fonts.iter().try_fold(0usize, |total, (_, bytes)| total.checked_add(bytes.len())) else { return false };
+    if input_bytes > 64 << 20 {
+        return false;
+    }
+    let mut faces = HashMap::new();
+    for (name, bytes) in fonts {
+        let name = key(name);
+        let Some(face) = Face::parse(bytes.clone()) else { return false };
+        if name.is_empty() || name == "." || name == ".." || faces.insert(name, face).is_some() {
+            return false;
+        }
+    }
+    let mut c = cache().lock().unwrap_or_else(PoisonError::into_inner);
+    let added = faces.keys().filter(|name| !c.faces.contains_key(*name)).count();
+    let removed_bytes: usize = faces.keys().filter_map(|name| c.faces.get(name).and_then(Option::as_ref)).map(|f| f.bytes.len()).sum();
+    let Some(added_bytes) = faces.values().try_fold(0usize, |total, f| total.checked_add(f.bytes.len())) else { return false };
+    let Some(bytes) = c.bytes.saturating_sub(removed_bytes).checked_add(added_bytes) else { return false };
+    if c.faces.len().saturating_add(added) > 256 || bytes > 64 << 20 {
+        return false;
+    }
+    c.bytes = bytes;
+    for (name, face) in faces {
+        c.faces.insert(name, Some(face));
+    }
     true
 }
 

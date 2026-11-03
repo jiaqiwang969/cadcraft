@@ -14,7 +14,7 @@ use crate::Shaped;
 
 mod lookup;
 mod machine;
-pub use lookup::{find, register};
+pub use lookup::{find, register, register_many};
 pub(crate) use machine::Cursor;
 
 const MAX_FILE_BYTES: usize = 16 << 20;
@@ -55,6 +55,11 @@ impl<'a> Reader<'a> {
 }
 
 impl Face {
+    /// Whether this parsed face is a legacy Big Font, rather than a base shapes font.
+    pub fn is_bigfont(&self) -> bool {
+        self.kind == Kind::Bigfont
+    }
+
     /// Read the legacy shapes / Big Font containers. Unsupported containers and extended
     /// Big Fonts return None so the caller can use its normal missing-font fallback.
     pub fn parse(bytes: Arc<[u8]>) -> Option<Arc<Self>> {

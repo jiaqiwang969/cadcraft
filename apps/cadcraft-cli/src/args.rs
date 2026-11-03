@@ -76,6 +76,7 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     Info(InfoArgs),
     Convert(ConvertArgs),
+    Review(ReviewArgs),
     Run(RunArgs),
     Commands(CommandsArgs),
     Mcp(McpArgs),
@@ -108,6 +109,29 @@ pub(crate) struct ConvertArgs {
     pub(crate) in_place: bool,
     #[command(flatten)]
     pub(crate) settings: Settings,
+}
+
+/// Export a monochrome engineering review using the compiled mechanical-review-v1 profile
+#[derive(Args)]
+pub(crate) struct ReviewArgs {
+    #[arg(value_name = "IN", help = read_help())]
+    pub(crate) input: PathBuf,
+    /// New PNG path; existing files and the input are never replaced
+    #[arg(value_name = "OUT.png")]
+    pub(crate) output: PathBuf,
+    /// Verified font pack directory; defaults to Fonts beside the executable
+    #[arg(long, value_name = "DIR")]
+    pub(crate) font_dir: Option<PathBuf>,
+    /// Preview is 2560×1440; 8k is 7680×4320
+    #[arg(long, value_enum, default_value = "preview")]
+    pub(crate) quality: ReviewQuality,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ReviewQuality {
+    Preview,
+    #[value(name = "8k")]
+    Full,
 }
 
 /// The settings the desktop app reads from its environment, for the subcommands that draw or run
@@ -453,6 +477,7 @@ fn framing_error(cli: &Cli) -> Option<UsageError> {
 fn out_is_input(cli: &Cli) -> Option<UsageError> {
     let same = |input: &Path, out: &Path| out.exists() && same_file::is_same_file(input, out).unwrap_or(false);
     match &cli.command {
+        Command::Review(c) if same(&c.input, &c.output) => Some(UsageError::OutIsInput(c.output.clone())),
         Command::Convert(c) if !c.in_place && same(&c.input, &c.output) => Some(UsageError::OutIsInput(c.output.clone())),
         Command::Run(r) if !r.in_place => {
             let inputs = r.drawings.iter().filter_map(|d| if let Drawing::File(f) = d { Some(f) } else { None });

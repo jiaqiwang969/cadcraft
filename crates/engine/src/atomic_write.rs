@@ -42,6 +42,25 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_atomic_with(path, permissions, |file| file.write_all(bytes))
 }
 
+/// Publish a complete new file without replacing any existing entry, even if another
+/// writer creates the destination while the bytes are being prepared. Hard-link publication
+/// is atomic and exclusive; a filesystem without hard links returns an error.
+pub fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let (mut file, tmp) = create_temp(dir, None)?;
+    let result = (|| {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::hard_link(&tmp, path)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    if result.is_ok() {
+        sync_dir(dir);
+    }
+    result
+}
+
 /// [`write_atomic`] filling the temporary file through `fill` (streamed rather than one buffer),
 /// with `permissions` given to it from its creation (`None`: the usual creation mode). A symlink
 /// at `path` is replaced by the new file, never written through.
@@ -158,6 +177,33 @@ fn create_exclusive(path: &Path, permissions: Option<&Permissions>) -> io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_new_writers_never_replace_each_other() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-aw-new-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("review.png");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let jobs: Vec<_> = [b"first".as_slice(), b"second".as_slice()]
+            .into_iter()
+            .map(|bytes| {
+                let dest = dest.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    (bytes, write_new(&dest, bytes))
+                })
+            })
+            .collect();
+        let results: Vec<_> = jobs.into_iter().map(|job| job.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|(_, r)| r.is_ok()).count(), 1);
+        let winner = results.iter().find(|(_, r)| r.is_ok()).unwrap().0;
+        assert_eq!(std::fs::read(&dest).unwrap(), winner);
+        assert_eq!(write_new(&dest, b"replacement").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&dest).unwrap(), winner);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn replaces_contents_atomically() {

@@ -16,6 +16,7 @@ mod info;
 mod mcp;
 mod output;
 mod perf;
+mod review;
 mod run;
 mod sample;
 
@@ -99,12 +100,14 @@ where
         Command::Run(a) => a.settings.apply(),
         Command::Mcp(a) => a.settings.apply(),
         Command::Sample(a) => a.settings.apply(),
+        Command::Review(_) => cadcraft_engine::settings_dir::set(None),
         Command::Info(_) | Command::Commands(_) | Command::Perf(_) => {}
     }
     let mut io = Streams::new(out, err);
     let result = match &cli.command {
         Command::Info(a) => info(a, &mut io),
         Command::Convert(a) => convert(a, &mut io),
+        Command::Review(a) => review::review(a, &mut io),
         Command::Run(a) => run_cmds(a, &mut io),
         Command::Commands(a) => commands(a, &mut io),
         Command::Mcp(a) => mcp(a),

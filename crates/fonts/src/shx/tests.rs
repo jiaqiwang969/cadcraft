@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn repeated_pack_registration_does_not_exhaust_cache_and_invalid_batch_is_atomic() {
+    let mut padded = shapes(&[(65, &[8, 0, 10, 0])]).bytes.to_vec();
+    padded.resize(1 << 20, 0);
+    let good: Arc<[u8]> = padded.into();
+    let entries = [("review-repeat-base".to_owned(), good.clone())];
+    for _ in 0..300 {
+        assert!(register_many(&entries));
+    }
+    assert!(find("review-repeat-base", "", "ANSI_1252").is_some());
+    let bad = [("review-batch-only".to_owned(), good), ("review-batch-bad".to_owned(), Arc::from(&b"invalid"[..]))];
+    assert!(!register_many(&bad));
+    assert!(find("review-batch-only", "", "ANSI_1252").is_none());
+}
+
 // Original synthetic instruction streams; no vendor fonts or extracted glyphs.
 fn shapes(entries: &[(u16, &[u8])]) -> Arc<Face> {
     let mut b = b"AutoCAD-86 shapes 1.1\r\n\x1a".to_vec();

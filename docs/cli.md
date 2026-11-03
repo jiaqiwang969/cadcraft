@@ -9,6 +9,11 @@ reference for every subcommand, flag and value; this page doesn't repeat them. E
 [README](../README.md#drive-it-from-agents-mcp-and-the-cli), MCP setup in [mcp.md](mcp.md),
 scripts and the JSON command forms in [customization.md](customization.md).
 
+For repeatable engineering review images, use `cadcraft-cli review IN.dwg OUT.png`.
+The compiled `mechanical-review-v1` profile fixes the print settings, verifies a local SHX
+font pack, and returns an output hash. See [Engineering review export](engineering-review-export.md)
+for the font manifest, 8K output and the equivalent MCP command.
+
 ## Conventions
 
 | | |

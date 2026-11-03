@@ -16,6 +16,7 @@ use viewports::MviewM;
 
 mod plotstyle;
 mod prompts;
+mod review;
 mod viewports;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -97,6 +98,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("pspace", "Paper Space", run_pspace).alias(&["ps"]).noundo(),
     ]
     .into_iter()
+    .chain(review::specs())
     .chain(plotstyle::specs())
     .chain(super::plotters::specs())
     .collect()

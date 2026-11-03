@@ -42,3 +42,13 @@ The native test run passes 3,065 tests. The repository's existing 28 ignored tes
 remain unchanged; they include known format limitations and are not represented
 as passing. The 28 focused integration tests also pass. No exclusion or lint
 allowance was added to obtain these results.
+
+## Compiled review export (`0.15.1-aixcam.3`)
+
+The next integration starts from merge `1590d59e591442d7cbe8502d5610fb5b0dfbe70d`
+and retains all of the repairs and tests above. Its shared `reviewplot` command
+and CLI `review` entry compile the versioned print recipe into the engine and
+require a hash-verified external SHX pack. See
+[Engineering review export](engineering-review-export.md) for the profile,
+deployment manifest, output receipt and regression scope. The font bytes and
+private rendering references remain outside the public repository.
