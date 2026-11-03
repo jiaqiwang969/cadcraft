@@ -29,7 +29,9 @@ pub(super) fn linear_text(meas: f64, d: &Dimension, st: &DimStyle, prefix: &str)
         } else {
             let plus = format_linear(st.tol_plus, &tf).1 + suffix;
             let minus = format_linear(st.tol_minus, &tf).1 + suffix;
-            let sign = |x: &str, pos: char| if x.trim_start_matches(['0', '.', ',']).is_empty() { x.to_string() } else { format!("{pos}{x}") };
+            let sign = |x: &str, pos: char| {
+                if x.starts_with('-') || x.trim_start_matches(['0', '.', ',']).is_empty() { x.to_string() } else { format!("{pos}{x}") }
+            };
             let (plus, minus) =
                 (sign(&plus, '+'), if st.tol_minus < 0.0 { format!("+{}", minus.trim_start_matches('-')) } else { sign(&minus, '-') });
             // DIMTOLJ aligns both runs on their shared line. Apply it before the

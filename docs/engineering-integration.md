@@ -52,3 +52,7 @@ require a hash-verified external SHX pack. See
 [Engineering review export](engineering-review-export.md) for the profile,
 deployment manifest, output receipt and regression scope. The font bytes and
 private rendering references remain outside the public repository.
+
+## Signed deviations — 0.15.1-aixcam.4
+
+Based on compiled-review commit `6fc6ccc8d39c4f014f6ed4a4c635132dac82fc69`, retaining the DWG block/arrow, SHX, leader and compiled review fixes. A negative upper deviation now keeps its own minus sign instead of receiving an additional plus sign (`34+-0.04/-0.12` becomes `34-0.04/-0.12`). Original synthetic regressions also cover two positive deviations at four decimals, zero upper deviation and symmetric deviations. This changes formatting, not the stored dimensional requirements or geometry. The review export profile and font validation remain unchanged; qualification against the private accepted reference is recorded outside the repository.

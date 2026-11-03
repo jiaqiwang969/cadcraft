@@ -35,6 +35,22 @@ fn text(d: &Dimension, vars: serde_json::Value) -> String {
 }
 
 #[test]
+fn upper_and_lower_deviations_preserve_their_own_signs() {
+    for (plus, minus, expected) in
+        [(-0.04, 0.12, "34-0.04/-0.12"), (0.0123, -0.0034, "34+0.0123/+0.0034"), (0.0, 0.025, "34 0/-0.025"), (0.025, 0.025, "34±0.025")]
+    {
+        assert_eq!(
+            text(
+                &linear(34.),
+                serde_json::json!({"DIMDEC":4,"DIMZIN":8,
+            "DIMTOL":1,"DIMTP":plus,"DIMTM":minus,"DIMTDEC":4,"DIMTZIN":8})
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
 fn dimrnd_rounds_neither_tolerances_nor_alternate_units() {
     let d = linear(10.3);
     let tol = serde_json::json!({"DIMRND": 0.5, "DIMDEC": 2, "DIMTOL": 1, "DIMTP": 0.1, "DIMTM": 0.1, "DIMTDEC": 2});
