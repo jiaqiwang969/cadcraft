@@ -62,7 +62,7 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
     let mut s = String::new();
     let _ = write!(
         s,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vw:.dp$} {vh:.dp$}" width="{:.0}" height="{:.0}"><rect width="100%" height="100%" fill="white"/>"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vw:.dp$} {vh:.dp$}" data-drawing-origin-x="{x0:.dp$}" data-drawing-top-y="{y1:.dp$}" width="{:.0}" height="{:.0}"><rect width="100%" height="100%" fill="white"/>"#,
         1600.0,
         1600.0 * vh / vw
     );
@@ -70,6 +70,14 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
     let tx = |x: f64| x - x0;
     let ty = |y: f64| y1 - y;
     for p in &list.prims {
+        // Display-list ownership is the top-level entity, including the text,
+        // arrows and extension lines of dimensions and nested block members.
+        // Zero is viewport content, not a model-space entity identity.
+        if p.handle.0 != 0 {
+            let _ = write!(s, r#"<g data-entity="{}">"#, p.handle.hex());
+        } else {
+            s.push_str(r#"<g data-unowned="viewport-content">"#);
+        }
         let c = p.display_rgb(white).hex();
         let op = opacity(p);
         let pts = list.points(p);
@@ -118,7 +126,43 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
                 }
             }
         }
+        s.push_str("</g>");
     }
     s.push_str("</svg>");
     s
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use cadcraft_doc::Handle;
+    use cadcraft_geom::Vec2;
+    use cadcraft_render::{DPrim, DisplayList};
+
+    #[test]
+    fn source_handles_keep_repeated_owners_and_viewport_content_distinct() {
+        let mut list = DisplayList { bounds: Bounds2::from_points([Vec2::new(20., 30.), Vec2::new(24., 33.)]), ..Default::default() };
+        for h in [0xABC, 0xABC, 0] {
+            let start = list.verts.len() as u32;
+            list.verts.extend([Vec2::new(20., 30.), Vec2::new(24., 33.)]);
+            list.prims.push(DPrim {
+                handle: Handle(h),
+                color: Rgb(0, 0, 0),
+                aci7: true,
+                lw: 0.25,
+                transparency: 0,
+                kind: Kind::Polyline,
+                start,
+                len: 2,
+            });
+        }
+        let s = export_list(&list, None);
+        assert_eq!(s.matches("data-entity=\"ABC\"").count(), 2);
+        assert_eq!(s.matches("data-unowned=\"viewport-content\"").count(), 1);
+        assert!(!s.contains("data-entity=\"0\""));
+        assert_eq!(s.matches("<polyline").count(), 3);
+        assert_eq!(s.matches("</g>").count(), 3);
+        assert!(s.contains("data-drawing-origin-x=\"19.920000\""));
+        assert!(s.contains("data-drawing-top-y=\"33.080000\""));
+    }
 }
