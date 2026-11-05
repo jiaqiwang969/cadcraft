@@ -121,7 +121,8 @@ mod native {
             ));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
-        Ok((add_header_vars(out.buf, &doc.header), notes))
+        let dxf = add_polyline_curve_types(add_header_vars(out.buf, &doc.header), &polyline_curve_types(&doc));
+        Ok((dxf, notes))
     }
 
     /// Most record types named in the skipped-records note.
@@ -483,6 +484,67 @@ mod native {
         dxf
     }
 
+    /// The curve type (POLYLINE group 75: 5 quadratic B-spline, 6 cubic B-spline, 8 Bezier) of
+    /// every curve- or spline-fit 2D polyline, by the handle acadrust writes for it. acadrust's DWG
+    /// reader reads the type but its DXF writer (0.6.6) leaves group 75 out of POLYLINE, so a PEDIT
+    /// Spline polyline would come back without it.
+    fn polyline_curve_types(doc: &acadrust::CadDocument) -> std::collections::HashMap<String, i16> {
+        use acadrust::entities::{EntityType, SmoothSurfaceType};
+        doc.entities()
+            .filter_map(|e| match e {
+                EntityType::Polyline2D(p) if p.smooth_surface != SmoothSurfaceType::None => {
+                    Some((format!("{:X}", p.common.handle.value()), p.smooth_surface as i16))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Add group 75 after group 70 of each POLYLINE named in `types`, in acadrust's ASCII layout
+    /// (`  0\r\nPOLYLINE\r\n  5\r\n<handle>\r\n` … ` 70\r\n<flags>\r\n`, before its first VERTEX).
+    /// A POLYLINE that already has a group 75, and text of another layout, are left unchanged; the
+    /// text is handled as bytes (it may be in a code page).
+    fn add_polyline_curve_types(mut dxf: Vec<u8>, types: &std::collections::HashMap<String, i16>) -> Vec<u8> {
+        if types.is_empty() || !dxf.windows(2).any(|w| w == b"\r\n") {
+            return dxf;
+        }
+        // Byte offsets of the code/value line pairs.
+        let mut lines: Vec<(usize, usize)> = Vec::new();
+        let mut at = 0;
+        while let Some(n) = dxf.get(at..).and_then(|r| r.windows(2).position(|w| w == b"\r\n")) {
+            lines.push((at, at + n));
+            at += n + 2;
+        }
+        let text = |k: usize| lines.get(k).and_then(|&(a, b)| dxf.get(a..b)).map(|b| String::from_utf8_lossy(b).trim().to_string());
+        let mut inserts: Vec<(usize, i16)> = Vec::new();
+        // (curve type wanted, insertion offset after group 70, group 75 already present)
+        let mut open: Option<(Option<i16>, Option<usize>, bool)> = None;
+        let mut k = 0;
+        while k + 1 < lines.len() {
+            let (code, value) = (text(k).unwrap_or_default(), text(k + 1).unwrap_or_default());
+            let after = lines.get(k + 1).map_or(0, |&(_, b)| b + 2);
+            match (code.as_str(), open.as_mut()) {
+                ("0", _) => {
+                    if let Some((Some(t), Some(pos), false)) = open {
+                        inserts.push((pos, t));
+                    }
+                    open = (value == "POLYLINE").then_some((None, None, false));
+                }
+                ("5", Some(o)) if o.0.is_none() && o.1.is_none() => o.0 = types.get(&value.to_ascii_uppercase()).copied(),
+                ("70", Some(o)) if o.1.is_none() => o.1 = Some(after),
+                ("75", Some(o)) => o.2 = true,
+                _ => {}
+            }
+            k += 2;
+        }
+        for (pos, t) in inserts.into_iter().rev() {
+            if pos <= dxf.len() {
+                dxf.splice(pos..pos, format!(" 75\r\n{t:>6}\r\n").into_bytes());
+            }
+        }
+        dxf
+    }
+
     /// Collects the DXF text and fails the write once it would grow past `limit`.
     struct CappedWriter {
         buf: Vec<u8>,
@@ -730,6 +792,36 @@ mod native {
             assert_eq!(table_merges_within(&mut doc, 250), 200, "two whole-table ranges fit, the rest are skipped");
             let mut doc = doc_with_table(10, 10, 1);
             assert_eq!(table_merges_within(&mut doc, usize::MAX), 100);
+        }
+
+        fn types(pairs: &[(&str, i16)]) -> std::collections::HashMap<String, i16> {
+            pairs.iter().map(|(h, t)| ((*h).to_string(), *t)).collect()
+        }
+
+        const POLY: &[u8] = b"  0\r\nPOLYLINE\r\n  5\r\n2A\r\n  8\r\nFIT\r\n 66\r\n     1\r\n 70\r\n     4\r\n  0\r\nVERTEX\r\n  5\r\n2B\r\n 70\r\n    16\r\n  0\r\nSEQEND\r\n  5\r\n2C\r\n  0\r\nEOF\r\n";
+
+        /// The curve type acadrust's DXF writer leaves out is added after group 70, once.
+        #[test]
+        fn curve_type_is_added_after_group_70() {
+            let out = add_polyline_curve_types(POLY.to_vec(), &types(&[("2A", 6)]));
+            let text = String::from_utf8_lossy(&out);
+            assert!(text.contains(" 70\r\n     4\r\n 75\r\n     6\r\n  0\r\nVERTEX"), "{text}");
+            assert_eq!(add_polyline_curve_types(out.clone(), &types(&[("2A", 6)])), out, "an existing 75 is kept, not doubled");
+            assert_eq!(add_polyline_curve_types(POLY.to_vec(), &types(&[("2B", 6)])), POLY, "only the named POLYLINE");
+            assert_eq!(add_polyline_curve_types(POLY.to_vec(), &types(&[])), POLY);
+        }
+
+        /// Other layouts, truncated text and code-page bytes are left alone without a panic.
+        #[test]
+        fn curve_type_fix_up_tolerates_hostile_text() {
+            let lf = String::from_utf8_lossy(POLY).replace("\r\n", "\n").into_bytes();
+            assert_eq!(add_polyline_curve_types(lf.clone(), &types(&[("2A", 6)])), lf);
+            for cut in [0, 1, 7, 30, 45, POLY.len() - 1] {
+                let _ = add_polyline_curve_types(POLY[..cut].to_vec(), &types(&[("2A", 6)]));
+            }
+            let mut gbk = POLY.to_vec();
+            gbk.splice(30..30, b"\xd6\xe1".to_vec());
+            let _ = add_polyline_curve_types(gbk, &types(&[("2A", 5)]));
         }
 
         /// A panic in the post-read fix-ups is an error, not a crash (#1934).

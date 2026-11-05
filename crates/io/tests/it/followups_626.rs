@@ -183,7 +183,12 @@ fn code_page_is_kept_before_2007() {
         assert_eq!(back.header.str("DWGCODEPAGE", ""), "ANSI_1251");
         assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::Text(t) if t.value == "Привет")));
     }
-    assert_eq!(code_page(&dxf(&d, Version::R2018)), "ANSI_1252", "2007+: UTF-8 text");
+    // 2007+: the text is UTF-8 and the drawing keeps its code page, as AutoCAD keeps it.
+    let bytes = save(&d, "x.dxf", Version::R2018);
+    assert_eq!(code_page(&String::from_utf8_lossy(&bytes)), "ANSI_1251", "2007+: the code page kept");
+    assert!(bytes.windows("Привет".len()).any(|w| w == "Привет".as_bytes()), "2007+: UTF-8 text");
+    let back = cadcraft_io::read_dxf(&bytes).unwrap();
+    assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::Text(t) if t.value == "Привет")));
     // Without one, or with one CADCraft doesn't know: ANSI_1252.
     d.header.set_str("DWGCODEPAGE", "NO_SUCH\n0\nEOF");
     assert_eq!(code_page(&dxf(&d, Version::R2000)), "ANSI_1252");

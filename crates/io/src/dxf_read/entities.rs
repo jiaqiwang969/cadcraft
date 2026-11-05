@@ -2,9 +2,9 @@ use super::common::{T, common, ocs};
 use super::hatch::hatch;
 use super::text::{attdef, attrib_modes, attrib_props, mtext_from, multiline_attrib, split_embedded, text_from};
 use super::{
-    Arc, Attrib, Circle, Common, DimKind, Dimension, Ellipse, EntityKind, Face3d, Handle, HashMap, Helix, HelixConstrain, Insert, Leader, Line,
-    LwPolyline, MAX_FRAME_CHARS, Point, PolyVertex, Polyline3d, RawTag, RayLine, Rx, Solid, Spline, Table, TableCell, Tag, Tolerance, Unknown, Vec2,
-    Vec3, Viewport, Wipeout, records,
+    Arc, Attrib, Circle, Common, DimKind, Dimension, Ellipse, EntityKind, Face3d, FitVertex, Handle, HashMap, Helix, HelixConstrain, Insert, Leader,
+    Line, LwPolyline, MAX_FRAME_CHARS, Point, PolyVertex, Polyline3d, PolylineFit, RawTag, RayLine, Rx, Solid, Spline, Table, TableCell, Tag,
+    Tolerance, Unknown, Vec2, Vec3, Viewport, Wipeout, records,
 };
 
 /// Parse one entity record. POLYLINE/INSERT followers are handled by the caller.
@@ -87,7 +87,14 @@ fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
             v.bulge = -v.bulge;
         }
     }
-    let pl = LwPolyline { vertices: verts, closed: flags & 1 != 0, const_width: t.fd(43, 0.0), elevation: t.fd(38, 0.0), plinegen: flags & 128 != 0 };
+    let pl = LwPolyline {
+        fit: None,
+        vertices: verts,
+        closed: flags & 1 != 0,
+        const_width: t.fd(43, 0.0),
+        elevation: t.fd(38, 0.0),
+        plinegen: flags & 128 != 0,
+    };
     // A region CADCraft wrote as polylines (`dxf_region`).
     crate::dxf_region::from_polyline(tags, pl)
 }
@@ -477,6 +484,9 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
 pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T) -> Option<(Common, EntityKind, Vec<EntityKind>)> {
     let flags = t.i(70).unwrap_or(0);
     let mut pts: Vec<(Vec3, f64, f64, f64)> = Vec::new();
+    // Every vertex record in file order with its flags and curve-fit tangent, spline frame
+    // vertices included: the fit record of a curve- or spline-fit 2D polyline.
+    let mut seq: Vec<((Vec3, f64, f64, f64), u8, Option<f64>)> = Vec::new();
     // Polyface face records (VERTEX 70 bit 128 without 64): vertex indices 71–74.
     let mut faces: Vec<[i64; 4]> = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
@@ -485,8 +495,13 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             let vflags = tt.i(70).unwrap_or(0);
             if vflags & 128 != 0 && vflags & 64 == 0 {
                 faces.push([71, 72, 73, 74].map(|c| tt.i(c).unwrap_or(0)));
-            } else if vflags & 16 == 0 {
-                pts.push((tt.p(10), tt.fd(42, 0.0), tt.fd(40, 0.0), tt.fd(41, 0.0)));
+            } else {
+                let v = (tt.p(10), tt.fd(42, 0.0), tt.fd(40, 0.0), tt.fd(41, 0.0));
+                if vflags & 16 == 0 {
+                    pts.push(v);
+                }
+                // Bits 0–7 hold every vertex flag the DXF Reference defines.
+                seq.push((v, u8::try_from(vflags & 0xFF).unwrap_or(0), tt.f(50).filter(|a| vflags & 2 != 0 && a.is_finite()).map(f64::to_radians)));
             }
             *i += 1;
         } else {
@@ -511,12 +526,23 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
         let m = if c.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+        let pv = |p: &(Vec3, f64, f64, f64)| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 };
+        // Curve fit (bit 2) or spline fit (bit 4): keep the record so the file keeps it.
+        let fit = (flags & 6 != 0).then(|| PolylineFit {
+            flags: u8::try_from(flags & 6).unwrap_or(0),
+            curve_type: t.i(75).and_then(|v| i16::try_from(v).ok()).unwrap_or(0),
+            sequence: seq
+                .iter()
+                .map(|(v, f, a)| FitVertex { v: pv(v), flags: *f, tangent: a.map(|a| if m < 0.0 { a.sin().atan2(-a.cos()) } else { a }) })
+                .collect(),
+        });
         EntityKind::LwPolyline(LwPolyline {
-            vertices: pts.iter().map(|p| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 }).collect(),
+            vertices: pts.iter().map(pv).collect(),
             closed: flags & 1 != 0,
             const_width: t.fd(40, 0.0).min(t.fd(41, 0.0)).max(0.0),
             elevation: t.p(10).z,
             plinegen: flags & 128 != 0,
+            fit,
         })
     };
     Some((c, k, extra))

@@ -38,6 +38,7 @@ fn fixtures() -> Vec<Fixture> {
         Fixture {
             wire_type: "LWPOLYLINE",
             kind: EntityKind::LwPolyline(LwPolyline {
+                fit: None,
                 vertices: vec![
                     PolyVertex { p: Vec2::new(1.25, -2.5), bulge: 0.5, start_width: 0.125, end_width: 0.75 },
                     PolyVertex::new(Vec2::new(5.0, 3.0)),

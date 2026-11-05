@@ -9,6 +9,7 @@ fn drawing(xs: &[f64], lt: &str, plinegen: bool) -> Drawing {
     let mut d = Drawing::new_imperial();
     d.linetypes.extend(library::standard_linetypes().into_iter().filter(|l| l.name == "DASHED"));
     let p = LwPolyline {
+        fit: None,
         vertices: xs.iter().map(|&x| PolyVertex::new(Vec2::new(x, 0.0))).collect(),
         closed: false,
         const_width: 0.2,
@@ -52,7 +53,7 @@ fn plinegen_runs_the_pattern_along_the_whole_polyline() {
 
 fn variable_drawing(vertices: Vec<PolyVertex>, closed: bool, lt: &str, plinegen: bool) -> Drawing {
     let mut d = drawing(&[], lt, plinegen);
-    let p = LwPolyline { vertices, closed, const_width: 0.0, elevation: 0.0, plinegen };
+    let p = LwPolyline { fit: None, vertices, closed, const_width: 0.0, elevation: 0.0, plinegen };
     let common = Common {
         linetype: lt.into(),
         lineweight: cadcraft_doc::Lineweight::Mm100(50),

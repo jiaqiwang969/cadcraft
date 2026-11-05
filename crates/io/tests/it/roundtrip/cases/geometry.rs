@@ -48,6 +48,7 @@ pub(crate) fn polylines(variable_width: bool) -> Vec<Case> {
                 cases.push(case(
                     &format!("lwpolyline/closed={closed}/plinegen={plinegen}/bulge={bulge}/widths={variable_width}"),
                     EntityKind::LwPolyline(LwPolyline {
+                        fit: None,
                         vertices: vec![
                             PolyVertex {
                                 p: Vec2::new(1.25, -2.5),

@@ -3,7 +3,8 @@ use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props,
 use super::ctx::Ctx;
 use super::layout::paper_view;
 use super::{
-    Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Hatch, Leader, MLeader, Point, Vec2, Vec3, Version, W, dxf_ext,
+    Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Hatch, Leader, LwPolyline, MLeader, Point, Vec2, Vec3, Version,
+    W, dxf_ext,
 };
 
 /// The persistent reactors of boundary objects: each source object of an associative hatch in
@@ -43,6 +44,55 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     write_viewport_entity(w, d, e, owner, paper, cx);
     write_wipeout_entity(w, d, e, owner, paper, cx);
     write_other_entity(w, d, e, owner, paper, cx);
+}
+
+/// A curve- or spline-fit polyline written back as the 2D POLYLINE it was read from (DXF
+/// Reference: POLYLINE, its VERTEX records and SEQEND): the fit flags and curve type, then every
+/// vertex of the fit record in file order with its flags, the spline frame included. Only called
+/// while the record still describes the polyline ([`LwPolyline::fit_record`]).
+fn fitted_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &LwPolyline) {
+    let Some(fit) = p.fit_record() else { return };
+    w.s(0, "POLYLINE");
+    common(w, e, owner, paper, "AcDb2dPolyline");
+    w.i(66, 1);
+    w.p(10, Vec3::new(0.0, 0.0, p.elevation));
+    thickness(w, e);
+    w.i(70, i64::from(p.closed) | i64::from(fit.flags & 6) | if p.plinegen { 128 } else { 0 });
+    if p.const_width > 0.0 {
+        w.f(40, p.const_width);
+        w.f(41, p.const_width);
+    }
+    if fit.curve_type != 0 {
+        w.i(75, i64::from(fit.curve_type));
+    }
+    for x in &fit.sequence {
+        let vh = w.h();
+        w.s(0, "VERTEX");
+        w.s(5, vh);
+        w.s(330, e.handle.hex());
+        w.s(100, "AcDbEntity");
+        w.s(8, &e.common.layer);
+        w.s(100, "AcDbVertex");
+        w.s(100, "AcDb2dVertex");
+        w.p(10, x.v.p.to3(0.0));
+        if x.v.start_width != 0.0 || x.v.end_width != 0.0 {
+            w.f(40, x.v.start_width);
+            w.f(41, x.v.end_width);
+        }
+        if x.v.bulge != 0.0 {
+            w.f(42, x.v.bulge);
+        }
+        w.i(70, i64::from(x.flags));
+        if let Some(a) = x.tangent.filter(|a| a.is_finite()) {
+            w.f(50, a.to_degrees());
+        }
+    }
+    let sh = w.h();
+    w.s(0, "SEQEND");
+    w.s(5, sh);
+    w.s(330, e.handle.hex());
+    w.s(100, "AcDbEntity");
+    w.s(8, &e.common.layer);
 }
 
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
@@ -90,6 +140,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.f(41, el.start);
             w.f(42, el.end);
         }
+        EntityKind::LwPolyline(p) if p.fit_record().is_some() => fitted_polyline(w, e, owner, paper, p),
         EntityKind::LwPolyline(p) => {
             w.s(0, "LWPOLYLINE");
             common(w, e, owner, paper, "AcDbPolyline");

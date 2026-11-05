@@ -42,6 +42,7 @@ fn synthetic(n: usize, side: f64) -> Result<cadcraft_engine::doc::Drawing, cadcr
             1 => EntityKind::Circle(d::Circle { center: v3(x, y), radius: s * 0.5 }),
             2 => EntityKind::Arc(d::Arc { center: v3(x, y), radius: s * 0.5, start: r.range(0.0, 3.0), end: r.range(3.2, 6.2) }),
             3 => EntityKind::LwPolyline(d::LwPolyline {
+                fit: None,
                 vertices: (0..6)
                     .map(|k| PolyVertex {
                         p: Vec2::new(x + f64::from(k) * s * 0.3, y + r.range(-s, s) * 0.3),

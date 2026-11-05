@@ -134,11 +134,12 @@ pub(super) fn header_vars(w: &mut W, d: &Drawing) {
     dim_header_vars(w, d);
 }
 
-/// `$DWGCODEPAGE`: before 2007 the code page read from the file when CADCraft knows it, in which
-/// a saved file's text is written (characters outside it as `\U+XXXX` escapes); otherwise, and
-/// from 2007 (UTF-8 text), `ANSI_1252`.
-pub(crate) fn code_page(d: &Drawing, version: Version) -> String {
+/// `$DWGCODEPAGE`: the code page read from the file when CADCraft knows it, otherwise
+/// `ANSI_1252`. Before 2007 a saved file's text is written in it (characters outside it as
+/// `\U+XXXX` escapes); from 2007 the text is UTF-8 and the drawing keeps its code page, as AutoCAD
+/// keeps it, so a later save to an older version still knows it.
+pub(crate) fn code_page(d: &Drawing, _version: Version) -> String {
     let read = d.header.get("DWGCODEPAGE").and_then(HVal::as_str).map(str::trim).unwrap_or_default();
     let known = read.is_ascii() && read.len() <= 32 && cadcraft_dxf::decode_code_page(b"", read).is_some();
-    if version < Version::R2007 && known { read.to_string() } else { "ANSI_1252".into() }
+    if known { read.to_string() } else { "ANSI_1252".into() }
 }

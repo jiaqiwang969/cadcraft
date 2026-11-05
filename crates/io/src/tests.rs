@@ -65,6 +65,7 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::LwPolyline(LwPolyline {
+            fit: None,
             vertices: vec![PolyVertex::new(Vec2::ZERO), PolyVertex::with_bulge(Vec2::new(4.0, 0.0), 0.5), PolyVertex::new(Vec2::new(4.0, 3.0))],
             closed: true,
             const_width: 0.0,
@@ -236,6 +237,7 @@ fn lwpolyline_elevation_roundtrips() {
             &Space::Model,
             Common::default(),
             EntityKind::LwPolyline(LwPolyline {
+                fit: None,
                 vertices: vec![PolyVertex::new(Vec2::ZERO), PolyVertex::new(Vec2::new(10.0, 0.0)), PolyVertex::new(Vec2::new(10.0, 10.0))],
                 closed: true,
                 const_width: 0.0,
@@ -929,6 +931,7 @@ fn generated_arrowhead_blocks_are_not_kept_as_user_blocks() {
 fn file_arrowhead_blocks_with_standard_names_are_kept() {
     let mut d = Drawing::new_metric();
     let donut = LwPolyline {
+        fit: None,
         vertices: vec![
             PolyVertex { p: Vec2::new(-0.25, 0.0), bulge: 1.0, start_width: 0.5, end_width: 0.5 },
             PolyVertex { p: Vec2::new(0.25, 0.0), bulge: 1.0, start_width: 0.5, end_width: 0.5 },
@@ -1001,6 +1004,7 @@ fn many_entities(n: usize) -> Drawing {
             0 => EntityKind::Line(Line { a: Vec3::new(x, y, 0.0), b: Vec3::new(x + 4.0, y + (i % 7) as f64, 0.0) }),
             1 => EntityKind::Circle(Circle { center: Vec3::new(x, y, 0.0), radius: 1.0 + (i % 5) as f64 }),
             _ => EntityKind::LwPolyline(LwPolyline {
+                fit: None,
                 vertices: (0..8).map(|k| PolyVertex::new(Vec2::new(x + f64::from(k), y + (k % 3) as f64))).collect(),
                 closed: false,
                 const_width: 0.0,
@@ -1116,6 +1120,7 @@ fn dimension_associativity_roundtrips() {
             &Space::Model,
             c(),
             EntityKind::LwPolyline(LwPolyline {
+                fit: None,
                 vertices: vec![PolyVertex::new(Vec2::new(30.0, 0.0)), PolyVertex::new(Vec2::new(32.0, 0.0)), PolyVertex::new(Vec2::new(32.0, 3.0))],
                 closed: false,
                 const_width: 0.0,
@@ -1188,6 +1193,7 @@ fn dimension_associativity_roundtrips() {
 #[test]
 fn polyline_vertex_references_name_the_segment() {
     let poly = |pts: &[(f64, f64)], closed: bool, bulges: &[(usize, f64)]| LwPolyline {
+        fit: None,
         vertices: pts
             .iter()
             .enumerate()
@@ -1230,6 +1236,7 @@ fn polyline_vertex_dimensions_round_trip_by_segment() {
             &Space::Model,
             c(),
             EntityKind::LwPolyline(LwPolyline {
+                fit: None,
                 vertices: pts.iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect(),
                 closed: true,
                 const_width: 0.0,

@@ -131,6 +131,7 @@ fn polyline_closedness_is_not_inferred_from_coincident_endpoints() {
                 points.push(points[0]);
             }
             let polyline = LwPolyline {
+                fit: None,
                 vertices: points.iter().copied().map(PolyVertex::new).collect(),
                 closed,
                 const_width: 0.0,

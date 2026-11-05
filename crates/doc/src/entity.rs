@@ -48,7 +48,7 @@ mod wipeout;
 
 pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
-pub use curves::{Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, RayLine, Solid};
+pub use curves::{Arc, Circle, Ellipse, Face3d, FitVertex, Line, LwPolyline, Point, Polyline3d, PolylineFit, RayLine, Solid};
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, MLeader};
 pub use fill::{Gradient, Hatch, HatchLoop};
 pub use layout::{Image, Table, TableCell, Viewport};
@@ -313,12 +313,23 @@ impl EntityKind {
                 }
             }
             EntityKind::LwPolyline(p) => {
-                for v in &mut p.vertices {
+                let tv = |v: &mut PolyVertex| {
                     v.p = m.apply(v.p);
                     v.start_width *= s;
                     v.end_width *= s;
                     if mirror {
                         v.bulge = -v.bulge;
+                    }
+                };
+                p.vertices.iter_mut().for_each(tv);
+                // A fit record moves with the polyline, so it still describes it.
+                if let Some(fit) = &mut p.fit {
+                    for x in &mut fit.sequence {
+                        tv(&mut x.v);
+                        x.tangent = x.tangent.map(|a| {
+                            let d = m.apply_vec(Vec2::new(a.cos(), a.sin()));
+                            d.y.atan2(d.x)
+                        });
                     }
                 }
                 p.const_width *= s;
@@ -574,7 +585,7 @@ mod grip_tests {
         // Grips are each vertex plus the midpoint of each segment; the segment vector is computed
         // once rather than rebuilt per vertex (CWE-407, row 35).
         let verts: Vec<PolyVertex> = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)].iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect();
-        let e = EntityKind::LwPolyline(LwPolyline { vertices: verts, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false });
+        let e = EntityKind::LwPolyline(LwPolyline { fit: None, vertices: verts, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false });
         let g = e.grips();
         // 3 vertices + 2 segment midpoints.
         assert_eq!(g.len(), 5, "{g:?}");
