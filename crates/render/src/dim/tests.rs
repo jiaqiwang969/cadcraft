@@ -376,6 +376,55 @@ fn radial_and_angular_text() {
     let g = dimension_geometry(&d, &st_with(|s| s.decimals = 1), 1.0);
     assert_eq!(g.value, "⌀6.0");
     assert_eq!(g.mtext_contents(), "%%c6.0", "the *D block's text (#1645)");
+    // A DIMPOST prefix replaces the default symbol (CAXA writes "%%C<>" and "R<>" as per-dimension
+    // overrides); a suffix alone keeps it.
+    let g = dimension_geometry(
+        &d,
+        &{
+            st_with(|s| {
+                s.post = "%%C<>".into();
+                s.decimals = 0;
+            })
+        },
+        1.0,
+    );
+    assert_eq!(g.mtext_contents(), "%%C6");
+    let g = dimension_geometry(
+        &d,
+        &{
+            st_with(|s| {
+                s.post = "<> TYP".into();
+                s.decimals = 0;
+            })
+        },
+        1.0,
+    );
+    assert_eq!(g.mtext_contents(), "%%c6 TYP");
+    let mut r = d.clone();
+    r.kind = DimKind::Radius;
+    r.defpt = Vec3::ZERO;
+    let g = dimension_geometry(
+        &r,
+        &{
+            st_with(|s| {
+                s.post = "R<>".into();
+                s.decimals = 0;
+            })
+        },
+        1.0,
+    );
+    assert_eq!(g.value, "R3");
+    let g = dimension_geometry(
+        &r,
+        &{
+            st_with(|s| {
+                s.post = "4×R<>".into();
+                s.decimals = 0;
+            })
+        },
+        1.0,
+    );
+    assert_eq!(g.value, "4×R3");
     let mut a = lin((10.0, 0.0), (0.0, 10.0), (3.0, 3.0), 0.0);
     a.kind = DimKind::Angular3P;
     a.p15 = Vec3::ZERO;

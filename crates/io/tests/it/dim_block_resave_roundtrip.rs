@@ -240,3 +240,60 @@ fn an_unedited_dimension_keeps_the_block_it_was_read_with() {
     let again = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&edited).as_bytes()).unwrap();
     assert_eq!(circles(&again).0, 0);
 }
+
+/// CAXA names a dimension's block `*X…`, not `*D…`. Such a block is the dimension's own as well:
+/// saved untouched it is written as read, so the text the drafter's program drew stays (here
+/// "R0.5" in an enlarged detail whose geometry measures 1.5), not regenerated under a new `*D`.
+#[test]
+fn an_unedited_dimension_keeps_a_block_another_program_named() {
+    use cadcraft_doc::{MText, Text};
+    let mut d = Drawing::new_metric();
+    let mut b = Block::new("*X35");
+    let text = Text {
+        insert: Vec3::new(0.2, 3.5, 0.0),
+        align_pt: None,
+        height: 2.5,
+        value: "R0.5".into(),
+        rotation: 0.0,
+        width_factor: 1.0,
+        oblique: 0.0,
+        style: "Standard".into(),
+        halign: Default::default(),
+        valign: Default::default(),
+    };
+    for kind in [EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.5, 0.0, 0.0) }), EntityKind::Text(text)] {
+        let h = d.new_handle();
+        b.entities.push(Entity::new(h, kind));
+    }
+    let kept: Vec<Handle> = b.entities.iter().map(|e| e.handle).collect();
+    d.blocks.insert("*X35".into(), Arc::new(b));
+    let mut dm = linear([0.0, 0.0], [1.5, 0.0], [0.75, 3.0]);
+    dm.block = Some("*X35".into());
+    let h = d.add(&Space::Model, Common::default(), EntityKind::Dimension(dm)).unwrap();
+    let shown = |d: &Drawing| {
+        let Some(EntityKind::Dimension(dm)) = d.entity(h).map(|e| &e.kind) else { panic!("dimension lost") };
+        let name = dm.block.clone().unwrap();
+        let blk = d.block(&name).unwrap();
+        let texts: Vec<String> = blk
+            .entities
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntityKind::Text(t) => Some(t.value.clone()),
+                EntityKind::MText(MText { contents, .. }) => Some(contents.clone()),
+                _ => None,
+            })
+            .collect();
+        (name, texts, blk.entities.iter().map(|e| e.handle).collect::<Vec<_>>())
+    };
+    let out = cadcraft_io::write_dxf(&d);
+    let (blocks, refs) = blocks_and_refs(&out);
+    assert_eq!(blocks.iter().filter(|n| n.as_str() == "*X35").count(), 1, "{blocks:?}");
+    assert!(dim_blocks(&out).is_empty(), "no regenerated *D block: {blocks:?}");
+    assert!(refs.contains(&"*X35".to_string()), "{refs:?}");
+    let back = cadcraft_io::read_dxf(out.as_bytes()).unwrap();
+    assert_eq!(shown(&back), ("*X35".to_string(), vec!["R0.5".to_string()], kept));
+    let dwg = cadcraft_io::read(&cadcraft_io::write(&d, "a.dwg").unwrap(), "a.dwg").unwrap();
+    assert_eq!(shown(&dwg).1, vec!["R0.5".to_string()]);
+    // Saving again changes nothing.
+    assert_eq!(resave(&out), resave(&resave(&out)));
+}

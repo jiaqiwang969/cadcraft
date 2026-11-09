@@ -2,9 +2,11 @@ use super::{
     Block, Color, Common, Dimension, Drawing, Entity, EntityKind, EntityStore, Handle, HashMap, Line, MText, Solid, Table, Vec2, Vec3, dxf_ext,
 };
 
-/// What happens to the anonymous `*D` blocks read from a file (#495): a dimension that still
+/// What happens to the anonymous blocks dimensions were read with (#495): a dimension that still
 /// names its block regenerates its geometry under that name, keeping the block's entity
-/// handles, and `*D` blocks nothing else references are not written again.
+/// handles, and `*D` blocks nothing else references are not written again. Other programs name
+/// these blocks differently (CAXA uses `*X`), so a dimension's own block is the anonymous block it
+/// names, whatever its prefix.
 pub(super) struct DimBlockPlan {
     /// Dimension (model or paper space) → the read block whose name and handles it reuses.
     pub(super) reuse: HashMap<Handle, std::sync::Arc<Block>>,
@@ -35,12 +37,23 @@ pub(super) fn dim_block_plan(d: &Drawing) -> DimBlockPlan {
     for e in d.blocks.values().flat_map(|b| b.entities.iter()) {
         note(e, true, &mut used);
     }
-    let skip = d.blocks.keys().filter(|n| is_dim_block(n)).map(|n| n.to_ascii_uppercase()).filter(|n| !used.contains(n)).collect();
+    // Anonymous blocks the model- and paper-space dimensions name: theirs alone unless something
+    // else uses them.
+    let named: std::collections::HashSet<String> = spaces
+        .iter()
+        .flat_map(|s| s.iter())
+        .filter_map(|e| match &e.kind {
+            EntityKind::Dimension(dm) => dm.block.as_deref().filter(|n| n.starts_with('*')).map(str::to_ascii_uppercase),
+            _ => None,
+        })
+        .collect();
+    let skip =
+        d.blocks.keys().map(|n| n.to_ascii_uppercase()).filter(|n| is_dim_block(n) || named.contains(n)).filter(|n| !used.contains(n)).collect();
     let mut plan = DimBlockPlan { reuse: HashMap::new(), skip };
     let mut claimed = std::collections::HashSet::new();
     for e in spaces.iter().flat_map(|s| s.iter()) {
         let EntityKind::Dimension(dm) = &e.kind else { continue };
-        let Some(b) = dm.block.as_deref().filter(|n| is_dim_block(n)).and_then(|n| d.block(n)) else { continue };
+        let Some(b) = dm.block.as_deref().and_then(|n| d.block(n)) else { continue };
         let key = b.name.to_ascii_uppercase();
         if plan.skip.contains(&key) && claimed.insert(key) {
             plan.reuse.insert(e.handle, b.clone());

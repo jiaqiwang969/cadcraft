@@ -156,6 +156,9 @@ struct Fmt {
     oblique: f64,
     /// `\A`: vertical alignment of this run on its line: 0 bottom, 1 centre, 2 top.
     valign: u8,
+    /// Set in a GD&T font (`\fgdt;`, CAXA's `\fCXGDT;`): its letters are geometric tolerance
+    /// symbols, drawn from the same geometry as feature control frames.
+    gdt: bool,
 }
 
 /// One shaped unit of a word.
@@ -191,6 +194,68 @@ fn arg(chars: &[char], from: usize) -> (String, usize) {
 
 fn num(a: &str) -> Option<f64> {
     a.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// Whether a font switch names a GD&T symbol font: `gdt` (the TOLERANCE font), AutoCAD
+/// Mechanical's `amgdt` or CAXA's `CXGDT`, as an SHX or TrueType name.
+fn is_gdt_font(a: &str) -> bool {
+    let name = a.split('|').next().unwrap_or("").trim().to_ascii_lowercase();
+    let stem = [".shx", ".ttf"].iter().find_map(|ext| name.strip_suffix(ext)).unwrap_or(&name);
+    matches!(stem, "gdt" | "amgdt" | "cxgdt")
+}
+
+/// Width of a run in a GD&T font: a symbol takes a square of the text height; other characters
+/// keep the run's font.
+fn gdt_width(t: &str, f: &Fmt) -> f64 {
+    let mut buf = [0u8; 4];
+    t.chars()
+        .map(|c| {
+            if cadcraft_doc::GdtSymbol::from_code(c).is_some() {
+                f.height * f.wf
+            } else {
+                text_width(&f.font, c.encode_utf8(&mut buf), f.height, f.wf)
+            }
+        })
+        .sum()
+}
+
+/// A run in a GD&T font shaped character by character: symbols from the feature control frame
+/// geometry (lines and circles as strokes, arrowheads as filled outlines), the rest in the font.
+fn gdt_shape(t: &str, f: &Fmt, origin: Vec2) -> Shaped {
+    let (h, w) = (f.height, f.height * f.wf);
+    let mut out = Shaped::default();
+    let mut x = origin.x;
+    let mut buf = [0u8; 4];
+    for c in t.chars() {
+        let Some(sym) = cadcraft_doc::GdtSymbol::from_code(c) else {
+            let s = c.encode_utf8(&mut buf);
+            let mut sh = shape_line(&f.font, s, h, f.wf, f.oblique);
+            sh.map(|p| p + Vec2::new(x, origin.y));
+            out.extend(sh);
+            x += text_width(&f.font, s, h, f.wf);
+            continue;
+        };
+        let at = |p: Vec2| Vec2::new(x + p.x * w, origin.y + p.y * h);
+        let arc = |center: Vec2, radius: f64, start: f64, sweep: f64| -> Vec<Vec2> {
+            (0..=32)
+                .map(|i| at(center + Vec2::new((start + sweep * f64::from(i) / 32.0).cos(), (start + sweep * f64::from(i) / 32.0).sin()) * radius))
+                .collect()
+        };
+        for prim in cadcraft_doc::symbol_prims(sym) {
+            match prim {
+                cadcraft_doc::GdtPrim::Line(pts) => out.strokes.push(pts.into_iter().map(at).collect()),
+                cadcraft_doc::GdtPrim::Circle { center, radius } => out.strokes.push(arc(center, radius, 0.0, std::f64::consts::TAU)),
+                cadcraft_doc::GdtPrim::Arc { center, radius, start, end } => {
+                    let sweep = (end - start).rem_euclid(std::f64::consts::TAU);
+                    out.strokes.push(arc(center, radius, start, if sweep == 0.0 { std::f64::consts::TAU } else { sweep }));
+                }
+                cadcraft_doc::GdtPrim::Fill(t) => out.glyphs.push(vec![t.iter().map(|p| at(*p)).collect()]),
+            }
+        }
+        x += w;
+    }
+    out.width = x - origin.x;
+    out
 }
 
 /// `\fArial|b1|i0|c0|p34;` → the font, trying a bold/italic face first.
@@ -258,6 +323,7 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
             wf: 1.0,
             oblique: 0.0,
             valign: 0,
+            gdt: false,
         });
         f(&mut n);
         if fmts.len() < 100_000 {
@@ -316,8 +382,13 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
                     'f' | 'F' => {
                         let (a, n) = arg(&chars, i);
                         i = n;
-                        if let Some(font) = font_switch(&a) {
-                            derive(&mut fmts, &mut cur, &|f| f.font = font.clone());
+                        if is_gdt_font(&a) {
+                            derive(&mut fmts, &mut cur, &|f| f.gdt = true);
+                        } else if let Some(font) = font_switch(&a) {
+                            derive(&mut fmts, &mut cur, &|f| {
+                                f.font = font.clone();
+                                f.gdt = false;
+                            });
                         }
                     }
                     'H' => {
@@ -421,6 +492,7 @@ fn parse(contents: &str, base: Fmt) -> (Vec<Atom>, Vec<Fmt>) {
 
 fn seg_width(seg: &Seg, f: &Fmt) -> f64 {
     match seg {
+        Seg::Text(t) if f.gdt => gdt_width(t, f),
         Seg::Text(t) => text_width(&f.font, t, f.height, f.wf),
         Seg::Stack(top, bottom, sep) => {
             let hs = f.height;
@@ -436,11 +508,14 @@ fn seg_width(seg: &Seg, f: &Fmt) -> f64 {
 }
 
 fn seg_advance(seg: &Seg, f: &Fmt) -> f64 {
-    if let (Seg::Text(t), TextFont::Shx(font)) = (seg, &f.font) { font.advance(t, f.height, f.wf) } else { seg_width(seg, f) }
+    match (seg, &f.font) {
+        (Seg::Text(t), TextFont::Shx(font)) if !f.gdt => font.advance(t, f.height, f.wf),
+        _ => seg_width(seg, f),
+    }
 }
 
 fn seg_height(seg: &Seg, f: &Fmt) -> f64 {
-    if let (Seg::Text(t), TextFont::Shx(font)) = (seg, &f.font) {
+    if let (Seg::Text(t), TextFont::Shx(font), false) = (seg, &f.font, f.gdt) {
         return font.height(t, f.height);
     }
     match seg {
@@ -473,6 +548,7 @@ fn seg_shape(seg: &Seg, f: &Fmt, x: f64) -> Shaped {
     };
     let w = seg_width(seg, f);
     match seg {
+        Seg::Text(t) if f.gdt => out.extend(gdt_shape(t, f, Vec2::new(x, 0.0))),
         Seg::Text(t) => out.extend(put(t, h, Vec2::new(x, 0.0))),
         Seg::Stack(top, bottom, sep) => {
             let hs = h;
@@ -647,7 +723,7 @@ pub fn layout_mtext_with(contents: &str, p: &MTextParams) -> MTextLayout {
     let wf = if p.width_factor.is_finite() && p.width_factor > 0.0 { p.width_factor } else { 1.0 };
     let width = if p.width.is_finite() && p.width > 0.0 { p.width } else { 0.0 };
     let rotation = if p.rotation.is_finite() { p.rotation } else { 0.0 };
-    let base = Fmt { font: p.font.clone(), height: h, color: None, under: false, over: false, wf, oblique: p.oblique, valign: 0 };
+    let base = Fmt { font: p.font.clone(), height: h, color: None, under: false, over: false, wf, oblique: p.oblique, valign: 0, gdt: false };
     let (atoms, fmts) = parse(contents, base.clone());
     if para::needed(contents, p) {
         return para::layout(contents, p, &base);
@@ -868,6 +944,32 @@ mod tests {
         let w: f64 = crate::line_width("alpha", 1.0, 1.0);
         assert!(w < 6.0);
         assert_eq!(l.lines.first().map(String::as_str), Some("alpha"));
+    }
+
+    /// A run in a GD&T font draws its letters as tolerance symbols (CAXA writes cylindricity as
+    /// `{\fCXGDT;\T1;g}`), not as the letters; the digits after it keep the text's font.
+    #[test]
+    fn gdt_font_runs_draw_tolerance_symbols() {
+        let plain = lay("h0.025", 0.0);
+        let runout = lay("{\\fCXGDT;\\T1;h}0.025", 0.0);
+        let glyphs = |l: &MTextLayout| l.pieces.iter().map(|p| p.shaped.glyphs.len()).sum::<usize>();
+        // The runout arrow's head is a filled outline; the stroke font draws none.
+        assert_eq!(glyphs(&plain), 0);
+        assert_eq!(glyphs(&runout), 1);
+        // Cylindricity: a circle of 0.3 of the height around the middle of the first square.
+        let cyl = lay("{\\fgdt;g}", 0.0);
+        let strokes: Vec<&Vec<Vec2>> = cyl.pieces.iter().flat_map(|p| p.shaped.strokes.iter()).collect();
+        let round = |s: &&&Vec<Vec2>| {
+            let n = s.len().saturating_sub(1).max(1) as f64;
+            let centre = s.iter().take(s.len().saturating_sub(1)).fold(Vec2::ZERO, |a, q| a + *q) / n;
+            s.len() > 8 && s.iter().all(|q| (q.dist(centre) - 0.3).abs() < 1e-9)
+        };
+        assert_eq!(strokes.iter().filter(round).count(), 1, "{strokes:?}");
+        assert_eq!(strokes.len(), 3, "circle and two lines");
+        for name in ["gdt", "GDT.SHX", "amgdt", "CXGDT", "cxgdt.ttf"] {
+            assert!(is_gdt_font(name), "{name}");
+        }
+        assert!(!is_gdt_font("gdtx") && !is_gdt_font("Arial"));
     }
 
     #[test]

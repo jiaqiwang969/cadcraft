@@ -5,8 +5,6 @@ version = 4
 [[package]]
 name = "acadrust"
 version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8923c99ea1f151cb7fc17ce2fc14f8b1e330fa22611e535602d985c0cc3c89a2"
 dependencies = [
  "anyhow",
  "bitflags 2.13.2",
@@ -614,7 +612,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cadcraft"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -643,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-cli"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -659,14 +657,14 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-color"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cadcraft-constraints"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-doc",
  "cadcraft-geom",
@@ -676,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-doc"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-color",
  "cadcraft-geom",
@@ -687,14 +685,14 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-dwg"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "acadrust",
 ]
 
 [[package]]
 name = "cadcraft-dxf"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "encoding_rs",
  "log",
@@ -703,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-engine"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-color",
  "cadcraft-constraints",
@@ -725,8 +723,9 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-fonts"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
+ "cadcraft-doc",
  "cadcraft-geom",
  "encoding_rs",
  "harfrust 0.14.0",
@@ -736,14 +735,14 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-geom"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cadcraft-io"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "acadrust",
  "cadcraft-color",
@@ -764,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-mcp"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -777,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-render"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
@@ -791,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-ui-egui"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
@@ -817,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-web"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -5896,7 +5895,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.15.1-aixcam.5"
+version = "0.15.1-aixcam.6"
 dependencies = [
  "chrono",
  "serde_json",

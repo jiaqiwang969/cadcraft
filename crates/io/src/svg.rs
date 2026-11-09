@@ -93,9 +93,14 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
                 s.push_str(r#""/>"#);
             }
             Kind::Tris | Kind::Mask => {
-                // A wipeout's mask hides what lies under it with the white background.
-                let c = if p.kind == Kind::Mask { white.hex() } else { c };
-                let _ = write!(s, r#"<path fill="{c}"{op} d=""#);
+                // A mask (a wipeout's, or the background behind a dimension's text) hides what
+                // lies under it with the white background; `data-mask` says so, so a viewer that
+                // recolours the drawing keeps it the paper's colour.
+                if p.kind == Kind::Mask {
+                    let _ = write!(s, r#"<path fill="{}" data-mask="background" d=""#, white.hex());
+                } else {
+                    let _ = write!(s, r#"<path fill="{c}"{op} d=""#);
+                }
                 for t in pts.chunks(3) {
                     if let [a, b2, cc] = t {
                         let _ =
@@ -164,5 +169,19 @@ mod source_tests {
         assert_eq!(s.matches("</g>").count(), 3);
         assert!(s.contains("data-drawing-origin-x=\"19.920000\""));
         assert!(s.contains("data-drawing-top-y=\"33.080000\""));
+    }
+
+    #[test]
+    fn masks_are_marked_and_white() {
+        let mut list = DisplayList { bounds: Bounds2::from_points([Vec2::new(0., 0.), Vec2::new(4., 3.)]), ..Default::default() };
+        for kind in [Kind::Mask, Kind::Tris] {
+            let start = list.tris.len() as u32;
+            list.tris.extend([Vec2::new(0., 0.), Vec2::new(4., 0.), Vec2::new(4., 3.)]);
+            list.prims.push(DPrim { handle: Handle(0x3CB), color: Rgb(0, 255, 0), aci7: false, lw: 0.25, transparency: 0, kind, start, len: 3 });
+        }
+        let s = export_list(&list, None);
+        assert_eq!(s.matches("data-mask=\"background\"").count(), 1);
+        assert!(s.contains("<path fill=\"#ffffff\" data-mask=\"background\" d=\"M"));
+        assert!(s.contains("<path fill=\"#00ff00\" d=\"M"), "an ordinary fill is not a mask: {s}");
     }
 }

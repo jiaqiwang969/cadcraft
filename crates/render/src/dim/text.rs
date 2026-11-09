@@ -17,7 +17,10 @@ pub(super) fn linear_text(meas: f64, d: &Dimension, st: &DimStyle, prefix: &str)
         let lo = format_linear(v - st.tol_minus, &nf).1;
         format!("{{\\H{};\\S{up}^{lo};}}", tol_height_code(st))
     } else {
-        format!("{prefix}{}", format_linear(v, &nf).1)
+        // A DIMPOST prefix (text before `<>`) replaces the default R or diameter symbol, as
+        // AutoCAD documents for the Primary Units prefix: "R<>" draws R8, not RR8.
+        let own_prefix = st.post.split_once("<>").is_some_and(|(before, _)| !before.is_empty());
+        format!("{}{}", if own_prefix { "" } else { prefix }, format_linear(v, &nf).1)
     };
     let mut s = post(&st.post, &main);
     if st.tolerance && !st.limits {

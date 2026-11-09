@@ -12,6 +12,16 @@ impl Fixture {
     fn pack(&self, entries: Value) {
         std::fs::write(self.0.join("cadcraft-fonts.json"), json!({"schema":"cadcraft.font-pack/1","fonts":entries}).to_string()).unwrap();
     }
+
+    fn pack_v2(&self, entries: Value, substitutes: Value) {
+        let manifest = json!({"schema":"cadcraft.font-pack/2","fonts":entries,"substitutes":substitutes});
+        std::fs::write(self.0.join("cadcraft-fonts.json"), manifest.to_string()).unwrap();
+    }
+
+    fn file(&self, name: &str, bytes: &[u8]) -> Value {
+        std::fs::write(self.0.join(name), bytes).unwrap();
+        json!({"name":name,"sha256":digest(bytes)})
+    }
 }
 
 impl Drop for Fixture {
@@ -114,4 +124,99 @@ fn review_preset_keeps_print_geometry_equal_at_both_resolutions() {
     assert_eq!(preview, full);
     assert_eq!(preview["plotStyleTable"], "monochrome.ctb");
     assert_eq!(preview["margins"], json!([0, 0, 0, 0]));
+}
+
+/// A synthetic Big Font with one glyph (code 0xA1A1); no real fonts.
+fn synthetic_bigfont() -> Vec<u8> {
+    let mut b = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
+    let header = b.len();
+    // 8, entries, ranges; one range; two entries (metadata 0 and the glyph).
+    for word in [8u16, 2, 1, 0xA1A1, 0xA1A1] {
+        b.extend(word.to_le_bytes());
+    }
+    let table = b.len() + 2 * 8;
+    let meta: &[u8] = &[0, 10, 2, 2, 0];
+    let glyph: &[u8] = &[0, 8, 0, 10, 0, 0];
+    b.extend(0u16.to_le_bytes());
+    b.extend((meta.len() as u16).to_le_bytes());
+    b.extend((table as u32).to_le_bytes());
+    b.extend(0xA1A1u16.to_le_bytes());
+    b.extend((glyph.len() as u16).to_le_bytes());
+    b.extend(((table + meta.len()) as u32).to_le_bytes());
+    b.extend(meta);
+    b.extend(glyph);
+    let _ = header;
+    assert!(shx::Face::parse(b.clone().into()).is_some_and(|f| f.is_bigfont()), "synthetic big font");
+    b
+}
+
+/// Version 2: a font the drawing names is drawn by a declared file of the pack, and the result
+/// says which; without the substitute the font is still missing.
+#[test]
+fn review_v2_substitutes_stand_for_required_fonts() {
+    let f = Fixture::new("v2-substitute");
+    let base = f.file("review-v2-base.shx", &synthetic_font());
+    let big = f.file("review-v2-big.shx", &synthetic_bigfont());
+    let mut d = drawing("review-v2-alias");
+    d.text_styles[0].big_font = "review-v2-bigalias.shx".into();
+    // A Big Font is read in the drawing's code page (a GB2312 drawing here).
+    d.header.set_str("DWGCODEPAGE", "ANSI_936");
+    f.pack_v2(json!([base.clone(), big.clone()]), json!([]));
+    assert!(verify_fonts(&d, Some(&f.0)).unwrap_err().to_string().contains("lacks the required base font: review-v2-alias"));
+    f.pack_v2(
+        json!([base.clone(), big.clone()]),
+        json!([{"font":"review-v2-alias","use":"review-v2-base.shx"},{"font":"review-v2-bigalias.shx","use":"review-v2-big.shx"}]),
+    );
+    let v = verify_fonts(&d, Some(&f.0)).unwrap();
+    assert_eq!(v["kind"], "verified_font_pack");
+    assert_eq!(
+        v["substitutes"],
+        json!([{"font":"review-v2-alias","use":"review-v2-base.shx"},{"font":"review-v2-bigalias.shx","use":"review-v2-big.shx"}])
+    );
+    assert!(shx::find("review-v2-alias", "review-v2-bigalias", "ANSI_936").is_some_and(|font| font.big.is_some()));
+}
+
+#[test]
+fn review_substitutes_are_checked() {
+    let f = Fixture::new("v2-checks");
+    let base = f.file("review-v2c-base.shx", &synthetic_font());
+    let mut d = drawing("review-v2c-base");
+    d.text_styles[0].big_font = "review-v2c-bigalias".into();
+    // A Big Font cannot be drawn by a base font file.
+    f.pack_v2(json!([base.clone()]), json!([{"font":"review-v2c-bigalias","use":"review-v2c-base.shx"}]));
+    assert!(verify_fonts(&d, Some(&f.0)).unwrap_err().to_string().contains("is not a Big font"));
+    // A substitute names a file of the pack, and never one of the pack's own fonts.
+    f.pack_v2(json!([base.clone()]), json!([{"font":"elsewhere","use":"missing.shx"}]));
+    assert!(read_pack(&f.0).err().unwrap().to_string().contains("names no file"));
+    f.pack_v2(json!([base.clone()]), json!([{"font":"review-v2c-base","use":"review-v2c-base.shx"}]));
+    assert!(read_pack(&f.0).err().unwrap().to_string().contains("repeats a font"));
+    // Version 1 has no substitutes and no TrueType files.
+    std::fs::write(
+        f.0.join("cadcraft-fonts.json"),
+        json!({"schema":"cadcraft.font-pack/1","fonts":[base],"substitutes":[{"font":"a","use":"review-v2c-base.shx"}]}).to_string(),
+    )
+    .unwrap();
+    assert!(read_pack(&f.0).err().unwrap().to_string().contains("cadcraft.font-pack/2"));
+    f.pack(json!([{"name":"face.ttf","sha256":"0".repeat(64)}]));
+    assert!(read_pack(&f.0).err().unwrap().to_string().contains("simple .shx"));
+    let junk = f.file("junk.ttf", b"not a font");
+    f.pack_v2(json!([junk]), json!([]));
+    assert!(read_pack(&f.0).err().unwrap().to_string().contains("invalid TrueType"));
+}
+
+/// A TrueType file of a version 2 pack draws a style that names it, or a face it stands for.
+/// Uses the bytes of the first of these common installed fonts; skips without any.
+#[test]
+fn review_v2_truetype_files_draw_their_styles() {
+    let found = ["Arial", "Helvetica", "DejaVuSans", "Verdana", "LiberationSans-Regular"].into_iter().find_map(ttf::find);
+    let Some(face) = found else { return };
+    let f = Fixture::new("v2-truetype");
+    let file = f.file("review-v2-face.ttf", &face.bytes);
+    f.pack_v2(json!([file]), json!([{"font":"Review V2 Alias","use":"review-v2-face.ttf"}]));
+    for name in ["review-v2-face.ttf", "Review V2 Alias"] {
+        let d = drawing(name);
+        let v = verify_fonts(&d, Some(&f.0)).unwrap();
+        assert_eq!(v["fonts"][0]["kind"], "truetype");
+        assert!(ttf::find(name).is_some_and(|got| got.bytes.len() == face.bytes.len()), "{name}");
+    }
 }
