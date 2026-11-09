@@ -892,6 +892,23 @@ mod justify_tests {
         assert!((start.y + H / 2.0).abs() < 1e-9, "MC: {start:?}");
     }
 
+    /// A character a TrueType face lacks that the drafting font has (⌀, AutoCAD's %%c) is drawn
+    /// by the drafting font, whatever is installed: its strokes and advance, no missing-glyph box.
+    /// Uses the first of these common fonts that is installed and lacks ⌀; skips without one.
+    #[test]
+    fn a_drafting_symbol_a_truetype_face_lacks_uses_the_drafting_font() {
+        let found =
+            ["Arial", "Helvetica", "DejaVuSans", "Verdana", "LiberationSans-Regular"].into_iter().filter_map(ttf::find).find(|f| !f.has_glyph('⌀'));
+        let Some(face) = found else { return };
+        let font = TextFont::Outline(face);
+        let sh = shape_line(&font, "⌀", 1.0, 1.0, 0.0);
+        assert!(sh.glyphs.is_empty(), "no outline glyph for ⌀");
+        assert_eq!(sh.strokes, shape_stroke("⌀", 1.0, 1.0, 0.0).strokes);
+        assert!((text_width(&font, "⌀", 1.0, 1.0) - char_advance('⌀')).abs() < 1e-12);
+        // A character the face has keeps the face's outline.
+        assert!(!shape_line(&font, "A", 1.0, 1.0, 0.0).glyphs.is_empty());
+    }
+
     /// With a TrueType font, a bottom-justified text's alignment point is at the face's descent,
     /// where its descenders end, as AutoCAD places it (#2229: Arial's is 0.296 of the height).
     /// Uses the first of these common fonts that is installed (Windows, macOS and Linux each have

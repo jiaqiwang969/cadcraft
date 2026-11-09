@@ -791,6 +791,14 @@ pub(crate) fn fallback_glyph(c: char) -> Option<Arc<GlyphOutline>> {
 }
 
 /// The glyph of `c` in `face`, or from a fallback font when `face` lacks it.
+/// The drafting font's strokes for a character `face` lacks, when the drafting font has it.
+fn drafting_stand_in(face: &Face, c: char) -> Option<&'static str> {
+    if c.is_whitespace() || glyph(face, c).mapped {
+        return None;
+    }
+    crate::stroke::glyph(c).map(|(_, spec)| spec)
+}
+
 fn glyph_or_fallback(face: &Face, c: char) -> Arc<GlyphOutline> {
     let g = glyph(face, c);
     if g.mapped || c.is_whitespace() {
@@ -874,6 +882,15 @@ pub fn shape(face: &Face, s: &str, height: f64, width_factor: f64, oblique: f64)
         if crate::bidi::is_format_control(c) {
             continue;
         }
+        // A character the face lacks that CADCraft's drafting font has (⌀ for %%c in a CJK face) is
+        // drawn by the drafting font, so it never depends on which fonts happen to be installed.
+        if let Some(spec) = drafting_stand_in(face, c) {
+            let adv = crate::char_advance(c) * h * wf;
+            crate::draw_stroke_glyph(&mut out, spec, x, h / crate::stroke::CAP, wf, shear);
+            spans.push((x, x + adv, under, over));
+            x += adv;
+            continue;
+        }
         let g = glyph_or_fallback(face, c);
         if !c.is_whitespace()
             && let Some(contours) = place_glyph_budgeted(&g, x, h, wf, shear, &mut points_left)
@@ -904,6 +921,9 @@ pub fn width(face: &Face, s: &str, height: f64, width_factor: f64) -> Option<f64
             .iter()
             .filter(|(c, _, _)| !crate::bidi::is_format_control(*c))
             .map(|(c, _, _)| {
+                if drafting_stand_in(face, *c).is_some() {
+                    return crate::char_advance(*c) * height * wf;
+                }
                 let g = glyph_or_fallback(face, *c);
                 g.advance * height / g.cap * wf
             })
