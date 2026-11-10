@@ -37,6 +37,7 @@ pub(crate) fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
         block_pstyle: ctx.block_pstyle,
         // The reference's own, set by the caller (`Builder::transparency` while it draws).
         block_transparency: ctx.block_transparency,
+        members: ctx.members,
     }
 }
 
@@ -54,7 +55,10 @@ pub(crate) fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc:
                 }
                 let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
                 let m = Mat3::translate(off).then_before(ins.transform(blk.base.xy()));
-                let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, m) };
+                // A block reference's contents are its members; the block a multileader shows as
+                // its content is part of the multileader, at any depth.
+                let members = ctx.members && matches!(e.kind, EntityKind::Insert(_));
+                let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, members, ..sub_ctx(ctx, e, m) };
                 for be in blk.entities.iter() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {
@@ -63,7 +67,9 @@ pub(crate) fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc:
                     if !b.expand() {
                         break 'copies;
                     }
+                    let outer = b.enter_member(&sub, be.handle);
                     entity(b, &sub, be);
+                    b.member = outer;
                 }
             }
         }

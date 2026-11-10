@@ -33,6 +33,22 @@ fn opacity(p: &cadcraft_render::DPrim) -> String {
     format!(r#" opacity="{:.2}""#, f64::from(p.alpha()) / 255.0)
 }
 
+/// ` data-member="…"` for primitive `prim` of top-level entity `top` when an entity inside the
+/// block of a block reference or of a dimension drew it (none for what `top` drew itself): the
+/// handles from `top` down to that entity, joined by `/`.
+fn member_attr(list: &cadcraft_render::DisplayList, top: cadcraft_doc::Handle, prim: usize) -> String {
+    let path = list.member_path(prim);
+    if path.is_empty() {
+        return String::new();
+    }
+    let mut s = format!(r#" data-member="{}"#, top.hex());
+    for h in path {
+        let _ = write!(s, "/{}", h.hex());
+    }
+    s.push('"');
+    s
+}
+
 /// Write a display list (as [`export_window`] does for a space's own).
 pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>) -> String {
     let window = window.filter(|w| !w.is_empty());
@@ -69,12 +85,21 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
     let white = Rgb(255, 255, 255);
     let tx = |x: f64| x - x0;
     let ty = |y: f64| y1 - y;
-    for p in &list.prims {
+    // The member written last (its index in the list's members, and its top-level entity) and
+    // its ` data-member="…"`: consecutive primitives mostly share it.
+    let mut member = ((cadcraft_render::NO_MEMBER, cadcraft_doc::Handle(0)), String::new());
+    for (i, p) in list.prims.iter().enumerate() {
         // Display-list ownership is the top-level entity, including the text,
         // arrows and extension lines of dimensions and nested block members.
         // Zero is viewport content, not a model-space entity identity.
         if p.handle.0 != 0 {
-            let _ = write!(s, r#"<g data-entity="{}">"#, p.handle.hex());
+            // What an entity inside a block reference's or a dimension's block drew also says
+            // which one: the handles from the top-level entity down to it, `/` between them.
+            let at = (list.prim_members.get(i).copied().unwrap_or(cadcraft_render::NO_MEMBER), p.handle);
+            if at != member.0 {
+                member = (at, member_attr(list, p.handle, i));
+            }
+            let _ = write!(s, r#"<g data-entity="{}"{}>"#, p.handle.hex(), member.1);
         } else {
             s.push_str(r#"<g data-unowned="viewport-content">"#);
         }
@@ -169,6 +194,53 @@ mod source_tests {
         assert_eq!(s.matches("</g>").count(), 3);
         assert!(s.contains("data-drawing-origin-x=\"19.920000\""));
         assert!(s.contains("data-drawing-top-y=\"33.080000\""));
+    }
+
+    #[test]
+    fn members_are_named_next_to_their_top_level_entity() {
+        use cadcraft_render::{Member, NO_MEMBER};
+        // Five primitives of top-level entity ABC: its own, one of member 1F, two of 2E inside
+        // 1F (the second a background) and its own again; then viewport content.
+        let mut list = DisplayList {
+            bounds: Bounds2::from_points([Vec2::new(0., 0.), Vec2::new(4., 3.)]),
+            members: vec![Member { parent: NO_MEMBER, handle: Handle(0x1F) }, Member { parent: 0, handle: Handle(0x2E) }],
+            prim_members: vec![NO_MEMBER, 0, 1, 1],
+            ..Default::default()
+        };
+        for (h, kind) in
+            [(0xABC, Kind::Polyline), (0xABC, Kind::Polyline), (0xABC, Kind::Polyline), (0xABC, Kind::Mask), (0xABC, Kind::Tris), (0, Kind::Polyline)]
+        {
+            let mask = matches!(kind, Kind::Mask | Kind::Tris);
+            let start = if mask { list.tris.len() } else { list.verts.len() } as u32;
+            let pts = [Vec2::new(0., 0.), Vec2::new(4., 0.), Vec2::new(4., 3.)];
+            if mask {
+                list.tris.extend(pts)
+            } else {
+                list.verts.extend(pts)
+            }
+            list.prims.push(DPrim { handle: Handle(h), color: Rgb(0, 0, 0), aci7: true, lw: 0.25, transparency: 0, kind, start, len: 3 });
+        }
+        let s = export_list(&list, None);
+        let groups: Vec<&str> = s.split("<g ").skip(1).map(|g| g.split('>').next().unwrap_or_default()).collect();
+        assert_eq!(
+            groups,
+            [
+                r#"data-entity="ABC""#,
+                r#"data-entity="ABC" data-member="ABC/1F""#,
+                r#"data-entity="ABC" data-member="ABC/1F/2E""#,
+                r#"data-entity="ABC" data-member="ABC/1F/2E""#,
+                r#"data-entity="ABC""#,
+                r#"data-unowned="viewport-content""#,
+            ]
+        );
+        assert!(s.contains(r##"<g data-entity="ABC" data-member="ABC/1F/2E"><path fill="#ffffff" data-mask="background" d="M"##), "{s}");
+        // Nothing else differs from the list without members.
+        let plain = export_list(&DisplayList { members: Vec::new(), prim_members: Vec::new(), ..list.clone() }, None);
+        assert!(!plain.contains("data-member"));
+        assert_eq!(s.replace(r#" data-member="ABC/1F/2E""#, "").replace(r#" data-member="ABC/1F""#, ""), plain);
+        // Viewport content names no member even when the list says one.
+        list.prim_members.extend([NO_MEMBER, 1]);
+        assert_eq!(export_list(&list, None), s);
     }
 
     #[test]

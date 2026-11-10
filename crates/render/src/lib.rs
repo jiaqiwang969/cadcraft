@@ -2,8 +2,10 @@
 //!
 //! [`build`] turns a drawing space into a [`DisplayList`]: world-space polylines, filled
 //! triangles and points, each tagged with its top-level entity handle and resolved colour.
-//! Linetypes, hatches, text, block references and dimensions are expanded here. The UI uploads
-//! the list to the GPU; [`raster`] draws it on the CPU (PNG export, plot preview, tests).
+//! Linetypes, hatches, text, block references and dimensions are expanded here; what an entity
+//! inside a block reference's or a dimension's block draws also names that entity
+//! ([`DisplayList::member_path`]). The UI uploads the list to the GPU; [`raster`] draws it on the
+//! CPU (PNG export, plot preview, tests).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -100,6 +102,10 @@ struct Ctx<'a> {
     block_pstyle: Option<usize>,
     /// Transparency (percent) of the block reference being expanded, for `ByBlock`.
     block_transparency: u8,
+    /// Whether the entities of a block drawn here are members of the top-level entity (see
+    /// [`DisplayList::members`]). Not so for model space seen through a viewport, which has no
+    /// top-level entity, nor inside the block a multileader shows as its content.
+    members: bool,
 }
 
 impl Ctx<'_> {
@@ -125,6 +131,9 @@ struct Builder<'a> {
     shared_budget: Option<&'a std::sync::atomic::AtomicUsize>,
     /// Transparency (percent) of the entity being drawn.
     transparency: u8,
+    /// The entity being drawn when it is inside the block of a block reference or of a
+    /// dimension (its index in [`DisplayList::members`]); [`NO_MEMBER`] for a top-level entity.
+    member: u32,
 }
 
 /// Upper bound on the block contents drawn per display list (each block reference, MINSERT copy
@@ -151,6 +160,30 @@ impl Builder<'_> {
             self.list.pens.push(pen);
         }
     }
+    /// Add a primitive, noting the member that draws it (see [`DisplayList::prim_members`]).
+    fn push(&mut self, p: DPrim) {
+        if self.member != NO_MEMBER {
+            self.list.prim_members.resize(self.list.prims.len(), NO_MEMBER);
+            self.list.prim_members.push(self.member);
+        }
+        self.list.prims.push(p);
+    }
+    /// Start drawing the entity `handle` of the block that the entity being drawn (a block
+    /// reference or a dimension) refers to, in the block's context `ctx`: what is drawn from now
+    /// on belongs to it. Returns the member to go back to after it ([`Builder::member`]). Where
+    /// block contents are no members ([`Ctx::members`]), and for an entity without a handle,
+    /// which has no identity of its own, what is drawn stays with the entity that holds it.
+    fn enter_member(&mut self, ctx: &Ctx, handle: Handle) -> u32 {
+        let outer = self.member;
+        if ctx.members
+            && handle.0 != 0
+            && let Some(i) = u32::try_from(self.list.members.len()).ok().filter(|i| *i != NO_MEMBER)
+        {
+            self.list.members.push(Member { parent: outer, handle });
+            self.member = i;
+        }
+        outer
+    }
     fn polyline(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[Vec2]) {
         if pts.len() < 2 {
             return;
@@ -175,7 +208,7 @@ impl Builder<'_> {
             self.list.bounds.add(q);
             self.list.verts.push(q);
         }
-        self.list.prims.push(DPrim {
+        self.push(DPrim {
             handle: ctx.top,
             color: color.rgb,
             aci7: color.aci7,
@@ -201,7 +234,7 @@ impl Builder<'_> {
             self.list.bounds.add(q);
             self.list.tris.push(q);
         }
-        self.list.prims.push(DPrim {
+        self.push(DPrim {
             handle: ctx.top,
             color: color.rgb,
             aci7: color.aci7,
@@ -261,7 +294,7 @@ impl Builder<'_> {
         self.list.bounds.add(q);
         let start = self.list.verts.len() as u32;
         self.list.verts.push(q);
-        self.list.prims.push(DPrim {
+        self.push(DPrim {
             handle: ctx.top,
             color: color.rgb,
             aci7: color.aci7,
@@ -277,7 +310,7 @@ impl Builder<'_> {
         let start = self.list.verts.len() as u32;
         self.list.verts.push(ctx.xf.apply(base));
         self.list.verts.push(ctx.xf.apply_vec(dir).normalized());
-        self.list.prims.push(DPrim {
+        self.push(DPrim {
             handle: ctx.top,
             color: color.rgb,
             aci7: color.aci7,
@@ -311,7 +344,7 @@ mod text_entity;
 mod viewports;
 
 pub use dim_draw::{dim_text, dimension_in};
-pub use display::{DPrim, DisplayList, Kind, MAX_TRANSPARENCY, NO_LAYER, PlotText, VIEWPORT_CONTENT, alpha};
+pub use display::{DPrim, DisplayList, Kind, MAX_TRANSPARENCY, Member, NO_LAYER, NO_MEMBER, PlotText, VIEWPORT_CONTENT, alpha};
 pub use pipeline::{Options, build, build_entities, build_plot};
 use props::{default_lineweight, resolve_common};
 use text_entity::text_style;

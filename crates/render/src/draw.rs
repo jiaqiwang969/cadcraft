@@ -325,7 +325,8 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
         let style = ctx.d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
         let g = if style.text_fill != 0 { dimension_in(ctx.d, dm) } else { DimGeometry::default() };
         let gap = style.text_gap.abs() * style.effective_scale(ctx.d.header.f64("DIMSCALE", 1.0));
-        let boxes: Vec<Vec<Vec2>> = if g.text_fill.is_empty() {
+        // Each background with the handle of its text: it is drawn as that text's.
+        let boxes: Vec<(Handle, Vec<Vec2>)> = if g.text_fill.is_empty() {
             Vec::new()
         } else {
             let solids: Vec<&Entity> =
@@ -337,7 +338,7 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
                 .filter(|be| matches!(be.kind, EntityKind::MText(_) | EntityKind::Text(_)))
                 .take(MAX_FILL_TEXTS)
                 .filter(|be| !covered(be))
-                .filter_map(|be| block_text_box(ctx.d, be, gap))
+                .filter_map(|be| block_text_box(ctx.d, be, gap).map(|corners| (be.handle, corners)))
                 .collect()
         };
         let mut fill_pending = !boxes.is_empty();
@@ -346,12 +347,16 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
                 break;
             }
             if fill_pending && starts_text_marks(be, &g, dm.block_offset.xy()) {
-                for corners in &boxes {
+                for (text, corners) in &boxes {
+                    let outer = b.enter_member(&sub, *text);
                     dim_text_fill(b, &sub, e, &style, corners);
+                    b.member = outer;
                 }
                 fill_pending = false;
             }
+            let outer = b.enter_member(&sub, be.handle);
             entity(b, &sub, be);
+            b.member = outer;
         }
     } else {
         dimension(b, ctx, e, dm, lw, lt, ltscale);
